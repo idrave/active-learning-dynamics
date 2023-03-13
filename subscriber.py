@@ -1,0 +1,354 @@
+import json
+from gymnasium import spaces
+from threading import Event, Lock
+from abc import ABC, abstractmethod
+import numpy as np
+
+class TopicServer(ABC):
+    """
+    When callback is called, it will set the event.
+    When the client reads the value through get_state, the event is cleared (only one client is supported).
+    Subclasses must call the callback and get_state methods at the begginging of their respective overriden methods.
+    """
+    def __init__(self):
+        self.event = Event()
+        self.lock = Lock()
+        self.recent = None
+
+    @abstractmethod
+    def callback(self, info):
+        with self.lock:
+            self.recent = info
+            self.event.set()
+    
+    @abstractmethod
+    def get_state(self):
+        """
+        Returns the latest information received. Waits if no information has been received since the last call
+        """
+        self.event.wait()
+        with self.lock:
+            info = self.recent
+            self.event.clear()
+        return info
+
+
+class AttitudeSub(TopicServer):
+    def __init__(self, chassis, freq=20) -> None:
+        self.yaw = []
+        self.pitch = []
+        self.roll = []     
+        self.chassis = chassis   
+        self.chassis.sub_attitude(freq=freq, callback=self.callback)
+    
+    def callback(self, info):
+        super().callback(info)
+        yaw, pitch, roll = info
+        self.yaw.append(yaw)
+        self.pitch.append(pitch)
+        self.roll.append(roll)
+
+    def unsubscribe(self):
+        self.chassis.unsub_attitude()
+    
+    def reset(self):
+        self.yaw = []
+        self.pitch = []
+        self.roll = []     
+    
+    def get_state(self):
+        info = super().get_state()
+        yaw, pitch, roll = info
+        return {
+            'yaw': yaw,
+            'pitch': pitch,
+            'roll': roll
+        }
+
+    def to_dict(self):
+        return {
+            'yaw': self.yaw,
+            'pitch': self.pitch,
+            'roll': self.roll
+        }
+
+class EscSub(TopicServer):
+    def __init__(self, chassis, freq=20) -> None:
+        self.speed = []
+        self.angle = []
+        self.timestamp = []
+        self.state = []
+        self.chassis = chassis   
+        self.chassis.sub_esc(freq=freq, callback=self.callback)
+    
+    def callback(self, info):
+        super().callback(info)
+        speed, angle, timestamp, state = info
+        self.speed.append(speed)
+        self.angle.append(angle)
+        self.timestamp.append(timestamp)
+        self.state.append(state)
+
+    def unsubscribe(self):
+        self.chassis.unsub_esc()
+    
+    def reset(self):
+        self.speed = []
+        self.angle = []
+        self.timestamp = []
+        self.state = []
+
+    def get_state(self):
+        info = super().get_state()
+        speed, angle, timestamp, state = info
+        return {
+            'speed': speed,
+            'angle': angle,
+            'timestamp': timestamp,
+            'state': state
+        }
+
+    def to_dict(self):
+        return {
+            'speed': self.speed,
+            'angle': self.angle,
+            'timestamp': self.timestamp,
+            'state': self.state
+        }
+
+class PositionSub(TopicServer):
+    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None: # TODO: stop robot if out of boundaries
+        self.x = []
+        self.y = []
+        self.z = []
+        self.chassis = chassis
+        self.chassis.sub_position(freq=freq, callback=self.callback)
+        self.pos_low = (x_low, y_low)
+        self.pos_high = (x_high, y_high)
+        self.oob = False
+    
+    def is_out_of_bounds(self, x, y):
+        position = (x, y)
+        return np.logical_or(position < self.pos_low, position > self.pos_high).any()
+    
+    def callback(self, info):
+        x, y, z = info
+        self.x.append(x)
+        self.y.append(y)
+        self.z.append(z)
+        oob = self.is_out_of_bounds(x, y)
+        if oob:
+            self.robot.chassis.drive_speed(0.,0.,0.,timeout=0.01)
+            self.oob = True
+
+    def unsubscribe(self):
+        self.chassis.unsub_position()
+    
+    def reset(self):
+        self.x = []
+        self.y = []
+        self.z = []
+        oob = False
+
+    def get_state(self):
+        info = super().get_state()
+        x, y, z = info
+        return {
+            'x': x,
+            'y': y,
+            'z': z,
+            'oob': self.oob
+        }
+
+    def to_dict(self):
+        return {
+            'x': self.x,
+            'y': self.y,
+            'z': self.z
+        }
+
+class VelocitySub(TopicServer):
+    def __init__(self, chassis, freq=20) -> None:
+        # global (initial) coordinate system
+        self.vgx = [] # x-direction speed 
+        self.vgy = [] # y-direction speed
+        self.vgz = [] # z-direction speed
+        # current body coordinate system
+        self.vbx = [] # x-direction speed
+        self.vby = [] # y-direction speed
+        self.vbz = [] # z-direction speed
+        self.chassis = chassis
+        self.chassis.sub_velocity(freq=freq, callback=self.callback)
+
+    def callback(self, info):
+        super().callback(info)
+        vgx, vgy, vgz, vbx, vby, vbz = info
+        self.vgx.append(vgx) 
+        self.vgy.append(vgy)
+        self.vgz.append(vgz)
+        self.vbx.append(vbx)
+        self.vby.append(vby)
+        self.vbz.append(vbz)
+
+    def unsubscribe(self):
+        self.chassis.unsub_velocity()
+
+    def reset(self):
+        self.vgx = []
+        self.vgy = []
+        self.vgz = []
+        self.vbx = []
+        self.vby = []
+        self.vbz = []
+
+    def get_state(self):
+        info = super().get_state()
+        vgx, vgy, vgz, vbx, vby, vbz = info
+        return {
+            'vgx': vgx,
+            'vgy': vgy,
+            'vgz': vgz,
+            'vbx': vbx,
+            'vby': vby,
+            'vbz': vbz,
+        }
+
+    def to_dict(self):
+        return {
+            'vgx': self.vgx,
+            'vgy': self.vgy,
+            'vgz': self.vgz,
+            'vbx': self.vbx,
+            'vby': self.vby,
+            'vbz': self.vbz,
+        }
+
+class ChassisSub:
+    def __init__(self, chassis, freq=20) -> None:
+        self.attribute_sub = AttitudeSub(chassis, freq=freq)
+        self.esc_sub = EscSub(chassis, freq=freq)
+        self.position_sub = PositionSub(chassis, freq=freq)
+        self.velocity_sub = VelocitySub(chassis, freq=freq)
+    
+    def unsubscribe(self):
+        self.attribute_sub.unsubscribe()
+        self.esc_sub.unsubscribe()
+        self.position_sub.unsubscribe()
+        self.velocity_sub.unsubscribe()
+    
+    def reset(self):
+        self.attribute_sub.reset()
+        self.esc_sub.reset()
+        self.position_sub.reset()
+        self.velocity_sub.reset()
+    
+    def get_state(self):
+        return {
+            'attitude': self.attribute_sub.get_state(),
+            'esc': self.esc_sub.get_state(),
+            'position': self.position_sub.get_state(),
+            'velocity': self.velocity_sub.get_state()
+        }
+
+    def to_dict(self):
+        return {
+            'attitude': self.attribute_sub.to_dict(),
+            'esc': self.esc_sub.to_dict(),
+        #    'imu': self.__get_as_seq(self.imu),
+        #    'mode': self.__get_as_seq(self.mode),
+            'position': self.position_sub.to_dict(),
+        #    'status': self.__get_as_seq(self.status),
+            'velocity': self.velocity_sub.to_dict()
+        }
+
+class GripperSub(TopicServer):
+    def __init__(self, gripper, freq=20) -> None:
+        self.status = []
+        self.gripper = gripper
+        self.gripper.sub_status(freq=freq, callback=self.callback)
+
+    def callback(self, gripper_status):
+        super().callback(gripper_status)
+        self.status.append(gripper_status)
+
+    def unsubscribe(self):
+        self.gripper.unsub_status()
+    
+    def reset(self):
+        self.status = []
+
+    def get_state(self):
+        status = super().get_state()
+        return {
+            'status': status
+        }
+
+    def to_dict(self):
+        return {
+            'status': self.status
+        }
+    
+class ArmSub(TopicServer):
+    def __init__(self, arm, freq=20) -> None:
+        self.pos_x = []
+        self.pos_y = []
+        self.arm = arm
+        self.arm.sub_position(freq=freq, callback=self.callback)
+
+    def callback(self, position):
+        super().callback(position)
+        pos_x, pos_y = position
+        self.pos_x.append(pos_x)
+        self.pos_y.append(pos_y)
+    
+    def unsubscribe(self):
+        self.arm.unsub_position()
+
+    def reset(self):
+        self.pos_x = []
+        self.pos_y = []
+        
+    def get_state(self):
+        x, y = super().get_state()
+        return {
+            'x': x,
+            'y': y
+        }
+    
+    def to_dict(self):
+        return {
+            'x': self.pos_x,
+            'y': self.pos_y
+        }
+
+class RobotSub:
+    def __init__(self, robot, freq=20) -> None:
+        self.robot = robot
+        self.chassis_sub = ChassisSub(robot.chassis, freq=freq)
+        self.gripper_sub = GripperSub(robot.gripper, freq=freq)
+        self.arm_sub = ArmSub(robot.robotic_arm, freq=freq)
+        self.freq = freq
+    
+    def unsubscribe(self):
+        self.chassis_sub.unsubscribe()
+        self.gripper_sub.unsubscribe()
+        self.arm_sub.unsubscribe()
+
+    def reset(self):
+        self.chassis_sub.reset()
+        self.gripper_sub.reset()
+        self.arm_sub.reset()
+        
+    def get_state(self):
+        return {
+            'chassis': self.chassis_sub.get_state(),
+            'gripper': self.gripper_sub.get_state(),
+            'arm': self.arm_sub.get_state()
+        }
+
+    def to_dict(self):
+        return {
+            'chassis': self.chassis_sub.to_dict(),
+            'gripper': self.gripper_sub.to_dict(),
+            'arm': self.arm_sub.to_dict()
+        }
