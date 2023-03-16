@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class TopicServer(ABC):
     """
     When callback is called, it will set the event.
-    When the client reads the value through get_state, the event is cleared (only one client is supported).
-    Subclasses must call the callback and get_state methods at the begginging of their respective overriden methods.
+    When the get_state is called, the event is cleared
+    Subclasses must call the callback and get_state methods at the beggining of their respective overriden methods.
     """
     def __init__(self, name):
         self.name = name
@@ -124,7 +124,7 @@ class EscSub(TopicServer):
         }
 
 class PositionSub(TopicServer):
-    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None: # TODO: stop robot if out of boundaries
+    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None:
         super().__init__('position')
         self.x = []
         self.y = []
@@ -140,14 +140,15 @@ class PositionSub(TopicServer):
         return comp.any()
     
     def callback(self, info):
-        super().callback((*info, self.is_out_of_bounds(info[0], info[1])))
-        x, y, z, oob = info
+        x, y, z = info
+        oob = self.is_out_of_bounds(x, y)
+        super().callback((*info, oob))
         self.x.append(x)
         self.y.append(y)
         self.z.append(z)
         if oob:
             logger.debug("Robot out of bounds! (low %s, high %s, current %s) Stopping robot..."%(self.pos_low, self.pos_high, (x, y)))
-            self.robot.chassis.drive_speed(0.,0.,0.,timeout=0.01)
+            self.chassis.drive_speed(0.,0.,0.,timeout=0.01)
 
     def unsubscribe(self):
         self.chassis.unsub_position()
