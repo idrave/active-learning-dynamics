@@ -3,6 +3,10 @@ from gymnasium import spaces
 from threading import Event, Lock
 from abc import ABC, abstractmethod
 import numpy as np
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 class TopicServer(ABC):
     """
@@ -10,7 +14,8 @@ class TopicServer(ABC):
     When the client reads the value through get_state, the event is cleared (only one client is supported).
     Subclasses must call the callback and get_state methods at the begginging of their respective overriden methods.
     """
-    def __init__(self):
+    def __init__(self, name):
+        self.name = name
         self.event = Event()
         self.lock = Lock()
         self.recent = None
@@ -35,6 +40,7 @@ class TopicServer(ABC):
 
 class AttitudeSub(TopicServer):
     def __init__(self, chassis, freq=20) -> None:
+        super().__init__('attitude')
         self.yaw = []
         self.pitch = []
         self.roll = []     
@@ -74,6 +80,7 @@ class AttitudeSub(TopicServer):
 
 class EscSub(TopicServer):
     def __init__(self, chassis, freq=20) -> None:
+        super().__init__('esc')
         self.speed = []
         self.angle = []
         self.timestamp = []
@@ -118,28 +125,29 @@ class EscSub(TopicServer):
 
 class PositionSub(TopicServer):
     def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None: # TODO: stop robot if out of boundaries
+        super().__init__('position')
         self.x = []
         self.y = []
         self.z = []
         self.chassis = chassis
-        self.chassis.sub_position(freq=freq, callback=self.callback)
-        self.pos_low = (x_low, y_low)
-        self.pos_high = (x_high, y_high)
-        self.oob = False
+        self.chassis.sub_position(cs=0,freq=freq, callback=self.callback) # coordinate system has 0 at current position
+        self.pos_low = np.array([x_low, y_low])
+        self.pos_high = np.array([x_high, y_high])
     
     def is_out_of_bounds(self, x, y):
-        position = (x, y)
-        return np.logical_or(position < self.pos_low, position > self.pos_high).any()
+        position = np.array([x, y])
+        comp = np.logical_or(position < self.pos_low, position > self.pos_high)
+        return comp.any()
     
     def callback(self, info):
-        x, y, z = info
+        super().callback((*info, self.is_out_of_bounds(info[0], info[1])))
+        x, y, z, oob = info
         self.x.append(x)
         self.y.append(y)
         self.z.append(z)
-        oob = self.is_out_of_bounds(x, y)
         if oob:
+            logger.debug("Robot out of bounds! (low %s, high %s, current %s) Stopping robot..."%(self.pos_low, self.pos_high, (x, y)))
             self.robot.chassis.drive_speed(0.,0.,0.,timeout=0.01)
-            self.oob = True
 
     def unsubscribe(self):
         self.chassis.unsub_position()
@@ -148,16 +156,15 @@ class PositionSub(TopicServer):
         self.x = []
         self.y = []
         self.z = []
-        oob = False
 
     def get_state(self):
         info = super().get_state()
-        x, y, z = info
+        x, y, z, oob = info
         return {
             'x': x,
             'y': y,
             'z': z,
-            'oob': self.oob
+            'oob': oob
         }
 
     def to_dict(self):
@@ -169,6 +176,7 @@ class PositionSub(TopicServer):
 
 class VelocitySub(TopicServer):
     def __init__(self, chassis, freq=20) -> None:
+        super().__init__('velocity')
         # global (initial) coordinate system
         self.vgx = [] # x-direction speed 
         self.vgy = [] # y-direction speed
@@ -223,38 +231,97 @@ class VelocitySub(TopicServer):
             'vbz': self.vbz,
         }
 
+class IMUSub(TopicServer):
+    def __init__(self, chassis, freq=20):
+        super().__init__('imu')
+        self.chassis = chassis
+        self.chassis.sub_imu(freq=freq, callback=self.callback)
+        self.acc_x = []
+        self.acc_y = []
+        self.acc_z = []
+        self.gyro_x = []
+        self.gyro_y = []
+        self.gyro_z = []
+
+    def callback(self, info):
+        super().callback(info)
+        acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z = info
+        self.acc_x.append(acc_x)
+        self.acc_y.append(acc_y)
+        self.acc_z.append(acc_z)
+        self.gyro_x.append(gyro_x)
+        self.gyro_y.append(gyro_y)
+        self.gyro_z.append(gyro_z)
+
+    def unsubscribe(self):
+        self.chassis.unsub_imu()
+
+    def reset(self):
+        self.acc_x = []
+        self.acc_y = []
+        self.acc_z = []
+        self.gyro_x = []
+        self.gyro_y = []
+        self.gyro_z = []
+
+    def get_state(self):
+        info = super().get_state()
+        acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z = info
+        return {
+            'acc_x': acc_x,
+            'acc_y': acc_y,
+            'acc_z': acc_z,
+            'gyro_x': gyro_x,
+            'gyro_y': gyro_y,
+            'gyro_z': gyro_z,
+        }
+    
+    def to_dict(self):
+        return {
+            'acc_x': self.acc_x,
+            'acc_y': self.acc_y,
+            'acc_z': self.acc_z,
+            'gyro_x': self.gyro_x,
+            'gyro_y': self.gyro_y,
+            'gyro_z': self.gyro_z,
+        }
+
 class ChassisSub:
-    def __init__(self, chassis, freq=20) -> None:
+    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None:
         self.attribute_sub = AttitudeSub(chassis, freq=freq)
         self.esc_sub = EscSub(chassis, freq=freq)
-        self.position_sub = PositionSub(chassis, freq=freq)
+        self.position_sub = PositionSub(chassis, x_low, x_high, y_low, y_high, freq=freq)
         self.velocity_sub = VelocitySub(chassis, freq=freq)
+        self.imu_sub = IMUSub(chassis, freq=freq)
     
     def unsubscribe(self):
         self.attribute_sub.unsubscribe()
         self.esc_sub.unsubscribe()
         self.position_sub.unsubscribe()
         self.velocity_sub.unsubscribe()
+        self.imu_sub.unsubscribe()
     
     def reset(self):
         self.attribute_sub.reset()
         self.esc_sub.reset()
         self.position_sub.reset()
         self.velocity_sub.reset()
+        self.imu_sub.reset()
     
     def get_state(self):
         return {
             'attitude': self.attribute_sub.get_state(),
             'esc': self.esc_sub.get_state(),
             'position': self.position_sub.get_state(),
-            'velocity': self.velocity_sub.get_state()
+            'velocity': self.velocity_sub.get_state(),
+            'imu': self.imu_sub.get_state()
         }
 
     def to_dict(self):
         return {
             'attitude': self.attribute_sub.to_dict(),
             'esc': self.esc_sub.to_dict(),
-        #    'imu': self.__get_as_seq(self.imu),
+            'imu': self.imu_sub.to_dict(),
         #    'mode': self.__get_as_seq(self.mode),
             'position': self.position_sub.to_dict(),
         #    'status': self.__get_as_seq(self.status),
@@ -263,6 +330,7 @@ class ChassisSub:
 
 class GripperSub(TopicServer):
     def __init__(self, gripper, freq=20) -> None:
+        super().__init__('gripper')
         self.status = []
         self.gripper = gripper
         self.gripper.sub_status(freq=freq, callback=self.callback)
@@ -290,6 +358,7 @@ class GripperSub(TopicServer):
     
 class ArmSub(TopicServer):
     def __init__(self, arm, freq=20) -> None:
+        super().__init__('arm')
         self.pos_x = []
         self.pos_y = []
         self.arm = arm
@@ -322,12 +391,14 @@ class ArmSub(TopicServer):
         }
 
 class RobotSub:
-    def __init__(self, robot, freq=20) -> None:
+    def __init__(self, robot, x_low, x_high, y_low, y_high, freq=20) -> None:
         self.robot = robot
-        self.chassis_sub = ChassisSub(robot.chassis, freq=freq)
+        self.chassis_sub = ChassisSub(robot.chassis, x_low, x_high, y_low, y_high, freq=freq)
         self.gripper_sub = GripperSub(robot.gripper, freq=freq)
         self.arm_sub = ArmSub(robot.robotic_arm, freq=freq)
         self.freq = freq
+        logger.debug('Sleep 1s for subscriber to have reliable values')
+        time.sleep(1)
     
     def unsubscribe(self):
         self.chassis_sub.unsubscribe()
