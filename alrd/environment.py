@@ -1,9 +1,8 @@
 import gymnasium as gym
 from gymnasium import spaces
 from robomaster import robot
-from subscriber import RobotSub
+from alrd.subscriber import RobotSub
 import numpy as np
-from robomaster import robot
 import time
 import logging
 

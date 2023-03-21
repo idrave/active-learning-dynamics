@@ -1,15 +1,15 @@
-from environment import RobomasterEnv
 import traceback
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
 from gymnasium.wrappers import RecordEpisodeStatistics, TimeLimit
 import numpy as np
 import time
-from utils import get_timestamp_str
+from alrd.utils import get_timestamp_str
+from alrd.environment import RobomasterEnv
+from alrd.agent import RandomGPAgent
 import json
 import pickle
 from pathlib import Path
-from agent import RandomGPAgent
 import logging
 import signal
 

@@ -1,5 +1,5 @@
 import numpy as np
-from environment import RobomasterEnv
+from alrd.environment import RobomasterEnv
 import scipy.interpolate
 
 class RandomGPAgent:
