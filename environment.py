@@ -66,7 +66,7 @@ class RobomasterEnv(gym.Env):
         return {
             self.POSITION: np.array([chassis_state['position']['x'], chassis_state['position']['y']]),
             self.OOB: chassis_state['position']['oob'],
-            self.ANGLE: np.array([chassis_state['attitude']['yaw']]),
+            self.ANGLE: np.array([-chassis_state['attitude']['yaw']]),
             self.VELOCITY: np.array([chassis_state['velocity']['vgx'], chassis_state['velocity']['vgy']]),
             self.ANGULAR_V: np.array([chassis_state['imu']['gyro_z']]), # TODO: check gyro_z readings
             self.ACCELERATION: np.array([chassis_state['imu']['acc_x'], chassis_state['imu']['acc_y']]),
@@ -86,8 +86,8 @@ class RobomasterEnv(gym.Env):
         # go to origin
         obs = self._get_obs()
         angle = obs[self.ANGLE].item()
-        logger.debug('moving %s degrees' % (angle))
-        self.robot.chassis.move(z=angle, z_speed=60.).wait_for_completed(timeout=5.)
+        logger.debug('moving %s degrees' % (-angle))
+        self.robot.chassis.move(z=-angle, z_speed=60.).wait_for_completed(timeout=5.)
         obs = self._get_obs()
         position = obs[self.POSITION]
         while np.abs(position).max() > 5e-2:

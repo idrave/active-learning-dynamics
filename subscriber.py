@@ -124,7 +124,7 @@ class EscSub(TopicServer):
         }
 
 class PositionSub(TopicServer):
-    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None:
+    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=50) -> None:
         super().__init__('position')
         self.x = []
         self.y = []

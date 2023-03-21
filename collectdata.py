@@ -22,9 +22,6 @@ class HandleSignal:
         logging.info('Closed with sigint')
         self.env.close()
 
- 
- 
-
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
     logging.info('Collecting data')
