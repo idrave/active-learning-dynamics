@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import logging
 import time
+from alrd.maze import Maze
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,12 @@ class TopicServer(ABC):
             self.event.set()
     
     @abstractmethod
-    def get_state(self):
+    def get_state(self, blocking=True):
         """
         Returns the latest information received. Waits if no information has been received since the last call
         """
-        self.event.wait()
+        if blocking:
+            self.event.wait()
         with self.lock:
             info = self.recent
             self.event.clear()
@@ -62,8 +64,8 @@ class AttitudeSub(TopicServer):
         self.pitch = []
         self.roll = []     
     
-    def get_state(self):
-        info = super().get_state()
+    def get_state(self, blocking=True):
+        info = super().get_state(blocking=blocking)
         yaw, pitch, roll = info
         return {
             'yaw': yaw,
@@ -105,8 +107,8 @@ class EscSub(TopicServer):
         self.timestamp = []
         self.state = []
 
-    def get_state(self):
-        info = super().get_state()
+    def get_state(self, blocking=True):
+        info = super().get_state(blocking=blocking)
         speed, angle, timestamp, state = info
         return {
             'speed': speed,
@@ -124,13 +126,48 @@ class EscSub(TopicServer):
         }
 
 class PositionSub(TopicServer):
-    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=50) -> None:
+    def __init__(self, chassis, freq=50) -> None:
         super().__init__('position')
         self.x = []
         self.y = []
         self.z = []
         self.chassis = chassis
         self.chassis.sub_position(cs=0,freq=freq, callback=self.callback) # coordinate system has 0 at current position
+    
+    def callback(self, info):
+        super().callback(info)
+        x, y, z = info
+        self.x.append(x)
+        self.y.append(y)
+        self.z.append(z)
+
+    def unsubscribe(self):
+        self.chassis.unsub_position()
+    
+    def reset(self):
+        self.x = []
+        self.y = []
+        self.z = []
+
+    def get_state(self, blocking=True):
+        info = super().get_state(blocking=blocking)
+        x, y, z = info
+        return {
+            'x': x,
+            'y': y,
+            'z': z,
+        }
+
+    def to_dict(self):
+        return {
+            'x': self.x,
+            'y': self.y,
+            'z': self.z
+        }
+
+class PositionSubBox(PositionSub):
+    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=50) -> None:
+        super().__init__(chassis, freq=freq)
         self.pos_low = np.array([x_low, y_low])
         self.pos_high = np.array([x_high, y_high])
     
@@ -142,7 +179,7 @@ class PositionSub(TopicServer):
     def callback(self, info):
         x, y, z = info
         oob = self.is_out_of_bounds(x, y)
-        super().callback((*info, oob))
+        TopicServer.callback(self, (*info, oob))
         self.x.append(x)
         self.y.append(y)
         self.z.append(z)
@@ -150,29 +187,14 @@ class PositionSub(TopicServer):
             logger.debug("Robot out of bounds! (low %s, high %s, current %s) Stopping robot..."%(self.pos_low, self.pos_high, (x, y)))
             self.chassis.drive_speed(0.,0.,0.,timeout=0.01)
 
-    def unsubscribe(self):
-        self.chassis.unsub_position()
-    
-    def reset(self):
-        self.x = []
-        self.y = []
-        self.z = []
-
-    def get_state(self):
-        info = super().get_state()
+    def get_state(self, blocking=True):
+        info = TopicServer.get_state(self, blocking=blocking)
         x, y, z, oob = info
         return {
             'x': x,
             'y': y,
             'z': z,
             'oob': oob
-        }
-
-    def to_dict(self):
-        return {
-            'x': self.x,
-            'y': self.y,
-            'z': self.z
         }
 
 class VelocitySub(TopicServer):
@@ -210,8 +232,8 @@ class VelocitySub(TopicServer):
         self.vby = []
         self.vbz = []
 
-    def get_state(self):
-        info = super().get_state()
+    def get_state(self, blocking=True):
+        info = super().get_state(blocking=blocking)
         vgx, vgy, vgz, vbx, vby, vbz = info
         return {
             'vgx': vgx,
@@ -265,8 +287,8 @@ class IMUSub(TopicServer):
         self.gyro_y = []
         self.gyro_z = []
 
-    def get_state(self):
-        info = super().get_state()
+    def get_state(self, blocking=True):
+        info = super().get_state(blocking=blocking)
         acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z = info
         return {
             'acc_x': acc_x,
@@ -287,13 +309,13 @@ class IMUSub(TopicServer):
             'gyro_z': self.gyro_z,
         }
 
-class ChassisSub:
-    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None:
+class ChassisSubAbs(ABC):
+    def __init__(self, chassis, position_sub: PositionSub, freq=20) -> None:
         self.attribute_sub = AttitudeSub(chassis, freq=freq)
         self.esc_sub = EscSub(chassis, freq=freq)
-        self.position_sub = PositionSub(chassis, x_low, x_high, y_low, y_high, freq=freq)
         self.velocity_sub = VelocitySub(chassis, freq=freq)
         self.imu_sub = IMUSub(chassis, freq=freq)
+        self.position_sub = position_sub
     
     def unsubscribe(self):
         self.attribute_sub.unsubscribe()
@@ -309,13 +331,15 @@ class ChassisSub:
         self.velocity_sub.reset()
         self.imu_sub.reset()
     
-    def get_state(self):
+    def get_state(self, blocking=True):
         return {
-            'attitude': self.attribute_sub.get_state(),
-            'esc': self.esc_sub.get_state(),
-            'position': self.position_sub.get_state(),
-            'velocity': self.velocity_sub.get_state(),
-            'imu': self.imu_sub.get_state()
+            'attitude': self.attribute_sub.get_state(blocking=blocking),
+            'esc': self.esc_sub.get_state(blocking=blocking),
+            'position': self.position_sub.get_state(blocking=blocking),
+            'velocity': self.velocity_sub.get_state(blocking=blocking),
+            'imu': self.imu_sub.get_state(blocking=blocking),
+            'mode': None, # TODO
+            'velocity': self.velocity_sub.to_dict(blocking=blocking)
         }
 
     def to_dict(self):
@@ -323,12 +347,77 @@ class ChassisSub:
             'attitude': self.attribute_sub.to_dict(),
             'esc': self.esc_sub.to_dict(),
             'imu': self.imu_sub.to_dict(),
-        #    'mode': self.__get_as_seq(self.mode),
+            'mode': None, # TODO
             'position': self.position_sub.to_dict(),
-        #    'status': self.__get_as_seq(self.status),
+            'status': None, # TODO
             'velocity': self.velocity_sub.to_dict()
         }
 
+class ChassisSub(ChassisSubAbs):
+    def __init__(self, chassis, freq=20) -> None:
+        super().__init__(chassis, PositionSub(chassis, freq=freq), freq=freq)
+    
+class ChassisSubBox(ChassisSubAbs):
+    def __init__(self, chassis, x_low, x_high, y_low, y_high, freq=20) -> None:
+        super().__init__(chassis, PositionSubBox(chassis, x_low, x_high, y_low, y_high, freq=freq), freq=freq)
+
+class VelocityActionSub(TopicServer):
+    def __init__(self):
+        super().__init__('velocity_action')
+
+    def callback(self, info):
+        """
+        Must be called to update with latest velocity (vx, vy, vz) commands
+        """
+        super().callback(info)
+
+    def get_state(self, blocking=True):
+        vx, vy, vz = super().get_state(blocking=blocking)        
+        return {
+            'vx': vx,
+            'vy': vy,
+            'vz': vz
+        }
+
+class MazeMarginChecker(TopicServer):
+    def __init__(self, chassis, command_sub: VelocityActionSub, maze: Maze, freq=20) -> None:
+        self.chassis = chassis
+        self.commands = command_sub
+        self.maze = maze
+        self.chassis.sub_position(cs=0, freq=freq, callback=self.callback) # coordinate system has 0 at current position
+        self.__last_x = None
+        self.__last_y = None
+    
+    def drive_speed(self, vx, vy, vz):
+        self.__drive_speed(self.__last_x, self.__last_y, vx, vy, vz)
+
+    def __drive_speed(self, x, y, vx, vy, vz):
+        v_valid = self.maze.valid_move((x,y), (vx, vy))
+        if v_valid:
+            self.chassis.drive_speed(vx, vy, vz)
+        else:
+            self.chassis.drive_speed(0, 0, vz)
+        return v_valid
+
+    def callback(self, info):
+        x, y, z = info
+        self.__last_x = x
+        self.__last_y = y
+        vx, vy, vz = self.commands.get_state(blocking=False)
+        v_valid = self.__drive_speed(x, y, vx, vy, vz)
+        super().callback(v_valid)
+    
+    def unsubscribe(self):
+        self.chassis.unsub_position()
+    
+    def get_state(self, blocking=True):
+        return {'v_valid': super().get_state(blocking)}
+        
+
+class ChassisSubMaze(ChassisSubAbs):
+    def __init__(self, chassis, maze, freq=20) -> None:
+        super().__init__
+    
 class GripperSub(TopicServer):
     def __init__(self, gripper, freq=20) -> None:
         super().__init__('gripper')
@@ -391,10 +480,10 @@ class ArmSub(TopicServer):
             'y': self.pos_y
         }
 
-class RobotSub:
-    def __init__(self, robot, x_low, x_high, y_low, y_high, freq=20) -> None:
+class RobotSubAbs(ABC):
+    def __init__(self, robot, chassis_sub: ChassisSubAbs, freq=20) -> None:
         self.robot = robot
-        self.chassis_sub = ChassisSub(robot.chassis, x_low, x_high, y_low, y_high, freq=freq)
+        self.chassis_sub = chassis_sub
         self.gripper_sub = GripperSub(robot.gripper, freq=freq)
         self.arm_sub = ArmSub(robot.robotic_arm, freq=freq)
         self.freq = freq
@@ -424,3 +513,12 @@ class RobotSub:
             'gripper': self.gripper_sub.to_dict(),
             'arm': self.arm_sub.to_dict()
         }
+
+class RobotSub(RobotSubAbs):
+    def __init__(self, robot, freq=20) -> None:
+        super().__init__(robot, ChassisSub(robot.chassis, freq=freq), freq=freq)
+
+class RobotSubBox(RobotSubAbs):
+    def __init__(self, robot, x_low, x_high, y_low, y_high, freq=20) -> None:
+        super().__init__(robot,ChassisSubBox(robot.chassis, x_low, x_high, y_low, y_high, freq=freq), freq=freq)
+    
