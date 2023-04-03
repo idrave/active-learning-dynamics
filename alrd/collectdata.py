@@ -5,8 +5,8 @@ from gymnasium.wrappers import RecordEpisodeStatistics, TimeLimit
 import numpy as np
 import time
 from alrd.utils import get_timestamp_str
-from alrd.environment import RobomasterEnv
-from alrd.agent import RandomGPAgent
+from alrd.environment import RobomasterEnv, create_maze_env
+from alrd.agent import RandomGPAgent, KeyboardAgent
 import json
 import pickle
 from pathlib import Path
@@ -25,10 +25,16 @@ class HandleSignal:
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
     logging.info('Collecting data')
-    datatime = 120.
+    datatime = 60.
     collected = 0.
-    x_min, x_max, y_min, y_max = -2.5, 2.5, -1.5, 1.5
-    robomaster_env = RobomasterEnv(x_min, x_max, y_min, y_max, freq=50)
+    x_min, x_max, y_min, y_max = -1.5, 1.5, -1.5, 1.5
+    coords = np.array([
+        (x_min, y_min),
+        (x_min, y_max),
+        (x_max, y_max),
+        (x_max, y_min)
+    ])
+    robomaster_env = create_maze_env(coordinates=coords, margin=0.20, freq=50)
     env = RecordEpisodeStatistics(robomaster_env)
     handler = HandleSignal(env)
     sample_freq = 50
@@ -39,9 +45,10 @@ if __name__ == '__main__':
         env = TimeLimit(env, max_episode_steps=max_episode_steps)
     kernel =  RBF(length_scale=1., length_scale_bounds='fixed')
     kernel += WhiteKernel(noise_level=1e-2, noise_level_bounds='fixed')
-    gpr = GaussianProcessRegressor(kernel=kernel).fit(X=np.array([[0]]), y=np.zeros((1,5)))
-    var_scale = (1,1,100.,20.,20.)
-    agent = RandomGPAgent(gpr, scale=var_scale, step=4)
+    # gpr = GaussianProcessRegressor(kernel=kernel).fit(X=np.array([[0]]), y=np.zeros((1,5)))
+    # var_scale = (1,1,100.,20.,20.)
+    # agent = RandomGPAgent(gpr, scale=var_scale, step=4)
+    agent = KeyboardAgent(1., 120)
     sequences = []
     sub_logs = []
     try:
@@ -50,11 +57,11 @@ if __name__ == '__main__':
             testaction = {
                 RobomasterEnv.VELOCITY: np.array([1.0, -0.5]),
                 RobomasterEnv.ANGULAR_V: 15.,
-                RobomasterEnv.ARM_POSITION: np.zeros(2)
+                # RobomasterEnv.ARM_POSITION: np.zeros(2)
             }
             obs, info = env.reset()
-            print('preparing agent')
-            agent.prepare(total, episode_seconds)
+            #print('preparing agent')
+            #agent.prepare(total, episode_seconds)
             start = time.time()
             done = False
             count = 0

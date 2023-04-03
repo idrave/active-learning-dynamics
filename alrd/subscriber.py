@@ -1,6 +1,6 @@
 import json
 from gymnasium import spaces
-from threading import Event, Lock
+from threading import Event, Lock, Thread
 from abc import ABC, abstractmethod
 import numpy as np
 import logging
@@ -28,15 +28,19 @@ class TopicServer(ABC):
             self.event.set()
     
     @abstractmethod
-    def get_state(self, blocking=True):
+    def get_state(self, blocking=True, timeout=None):
         """
-        Returns the latest information received. Waits if no information has been received since the last call
+        Returns the latest information received.
+        If blocking is True, waits if no information has been received since the last blocking call.
+        Non-blocking calls do not affect whether blocking calls should wait for new information.
+        If timeout is a positive floating number, the method waits at most such number of seconds and returns the latest value available.
         """
         if blocking:
-            self.event.wait()
+            self.event.wait(timeout=timeout)
         with self.lock:
             info = self.recent
-            self.event.clear()
+            if blocking:
+                self.event.clear()
         return info
 
 
@@ -64,8 +68,8 @@ class AttitudeSub(TopicServer):
         self.pitch = []
         self.roll = []     
     
-    def get_state(self, blocking=True):
-        info = super().get_state(blocking=blocking)
+    def get_state(self, blocking=True, timeout=None):
+        info = super().get_state(blocking=blocking, timeout=timeout)
         yaw, pitch, roll = info
         return {
             'yaw': yaw,
@@ -107,8 +111,8 @@ class EscSub(TopicServer):
         self.timestamp = []
         self.state = []
 
-    def get_state(self, blocking=True):
-        info = super().get_state(blocking=blocking)
+    def get_state(self, blocking=True, timeout=None):
+        info = super().get_state(blocking=blocking, timeout=timeout)
         speed, angle, timestamp, state = info
         return {
             'speed': speed,
@@ -149,8 +153,8 @@ class PositionSub(TopicServer):
         self.y = []
         self.z = []
 
-    def get_state(self, blocking=True):
-        info = super().get_state(blocking=blocking)
+    def get_state(self, blocking=True, timeout=None):
+        info = super().get_state(blocking=blocking, timeout=timeout)
         x, y, z = info
         return {
             'x': x,
@@ -187,7 +191,7 @@ class PositionSubBox(PositionSub):
             logger.debug("Robot out of bounds! (low %s, high %s, current %s) Stopping robot..."%(self.pos_low, self.pos_high, (x, y)))
             self.chassis.drive_speed(0.,0.,0.,timeout=0.01)
 
-    def get_state(self, blocking=True):
+    def get_state(self, blocking=True, timeout=None):
         info = TopicServer.get_state(self, blocking=blocking)
         x, y, z, oob = info
         return {
@@ -232,8 +236,8 @@ class VelocitySub(TopicServer):
         self.vby = []
         self.vbz = []
 
-    def get_state(self, blocking=True):
-        info = super().get_state(blocking=blocking)
+    def get_state(self, blocking=True, timeout=None):
+        info = super().get_state(blocking=blocking, timeout=timeout)
         vgx, vgy, vgz, vbx, vby, vbz = info
         return {
             'vgx': vgx,
@@ -287,8 +291,8 @@ class IMUSub(TopicServer):
         self.gyro_y = []
         self.gyro_z = []
 
-    def get_state(self, blocking=True):
-        info = super().get_state(blocking=blocking)
+    def get_state(self, blocking=True, timeout=None):
+        info = super().get_state(blocking=blocking, timeout=timeout)
         acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z = info
         return {
             'acc_x': acc_x,
@@ -331,7 +335,7 @@ class ChassisSubAbs(ABC):
         self.velocity_sub.reset()
         self.imu_sub.reset()
     
-    def get_state(self, blocking=True):
+    def get_state(self, blocking=True, timeout=None):
         return {
             'attitude': self.attribute_sub.get_state(blocking=blocking),
             'esc': self.esc_sub.get_state(blocking=blocking),
@@ -371,8 +375,8 @@ class VelocityActionSub(TopicServer):
         """
         super().callback(info)
 
-    def get_state(self, blocking=True):
-        vx, vy, vz = super().get_state(blocking=blocking)        
+    def get_state(self, blocking=True, timeout=None):
+        vx, vy, vz = super().get_state(blocking=blocking, timeout=timeout)
         return {
             'vx': vx,
             'vy': vy,
@@ -380,44 +384,46 @@ class VelocityActionSub(TopicServer):
         }
 
 class MazeMarginChecker(TopicServer):
-    def __init__(self, chassis, command_sub: VelocityActionSub, maze: Maze, freq=20) -> None:
+    def __init__(self, chassis, position_srv: PositionSub, attitude_srv: AttitudeSub, command_sub: VelocityActionSub, maze: Maze, freq=20) -> None:
         self.chassis = chassis
         self.commands = command_sub
         self.maze = maze
-        self.chassis.sub_position(cs=0, freq=freq, callback=self.callback) # coordinate system has 0 at current position
-        self.__last_x = None
-        self.__last_y = None
+        self.position_srv = position_srv
+        self.attitude_srv = attitude_srv
+        self.freq = freq
+        self.__started = False
+        self.__thread = None
     
-    def drive_speed(self, vx, vy, vz):
-        self.__drive_speed(self.__last_x, self.__last_y, vx, vy, vz)
-
-    def __drive_speed(self, x, y, vx, vy, vz):
-        v_valid = self.maze.valid_move((x,y), (vx, vy))
+    def __drive_speed(self, x, y, z, vx, vy, vz):
+        v_valid = self.maze.valid_move((x,y), z, (vx, vy))
         if v_valid:
             self.chassis.drive_speed(vx, vy, vz)
         else:
             self.chassis.drive_speed(0, 0, vz)
         return v_valid
+    
+    def __run(self):
+        while self.__started:
+            action = self.commands.get_state(timeout=1/self.freq)
+            position = self.position_srv.get_state(blocking=False)
+            angle = -self.attitude_srv.get_state(blocking=False)['yaw']
+            x, y = position['x'], position['y']
+            vx, vy, vz = action['vx'], action['vy'], action['vz']
+            v_valid = self.__drive_speed(x, y, angle, vx, vy, vz)
+            self.callback(v_valid)
+    
+    def start(self):
+        self.__started = True
+        self.__thread = Thread(target=self.__run, daemon=True)
 
-    def callback(self, info):
-        x, y, z = info
-        self.__last_x = x
-        self.__last_y = y
-        vx, vy, vz = self.commands.get_state(blocking=False)
-        v_valid = self.__drive_speed(x, y, vx, vy, vz)
-        super().callback(v_valid)
-    
-    def unsubscribe(self):
-        self.chassis.unsub_position()
-    
-    def get_state(self, blocking=True):
-        return {'v_valid': super().get_state(blocking)}
+    def join(self):
+        self.__started = False
+        self.__thread.join()
+
+    def get_state(self, blocking=True, timeout=None):
+        return {'v_valid': super().get_state(blocking, timeout=timeout)}
         
 
-class ChassisSubMaze(ChassisSubAbs):
-    def __init__(self, chassis, maze, freq=20) -> None:
-        super().__init__
-    
 class GripperSub(TopicServer):
     def __init__(self, gripper, freq=20) -> None:
         super().__init__('gripper')
@@ -435,8 +441,8 @@ class GripperSub(TopicServer):
     def reset(self):
         self.status = []
 
-    def get_state(self):
-        status = super().get_state()
+    def get_state(self, blocking=True, timeout=None):
+        status = super().get_state(blocking=blocking, timeout=timeout)
         return {
             'status': status
         }
@@ -467,8 +473,8 @@ class ArmSub(TopicServer):
         self.pos_x = []
         self.pos_y = []
         
-    def get_state(self):
-        x, y = super().get_state()
+    def get_state(self, blocking=True, timeout=None):
+        x, y = super().get_state(blocking=blocking, timeout=timeout)
         return {
             'x': x,
             'y': y

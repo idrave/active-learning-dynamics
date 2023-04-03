@@ -14,22 +14,17 @@ class MazeEnv(VelocityControlEnv):
         super().__init__(robot, subscriber)
         self.__velocity_cmd_sub = VelocityActionSub()
         self.__margin_checker = MazeMarginChecker(self.robot.chassis, self.__velocity_cmd_sub, maze, freq=freq)
+        self.__margin_checker.start()
     
     def _apply_action(self, action):
-        vel = action[self.VELOCITY]
-        ang_vel = action[self.ANGULAR_V]
-        self.__margin_checker.drive_speed(vel[0], vel[1], ang_vel)
-
-    def step(self, action):
         self.__velocity_cmd_sub.callback(action)
-        super().step(action)
 
     def reset(self, seed=None, options=None):
-        raise NotImplementedError
+        self.subscriber.reset() # TODO: go back to initial position
 
     def get_subscriber_log(self):
         return self.subscriber.to_dict()
     
     def close(self):
-        self.__margin_checker.unsubscribe()
+        self.__margin_checker.join()
         super().close()
