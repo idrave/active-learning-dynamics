@@ -9,9 +9,9 @@ class KeyboardAgent:
         self.a_speed = a_speed
         self.cmds = {
             'w': (1, 0, 0),
-            'a': (0, 1, 0),
+            'a': (0, -1, 0),
             's': (-1, 0, 0),
-            'd': (0, -1, 0),
+            'd': (0, 1, 0),
             'q': (0, 0, 1),
             'e': (0, 0, -1)
         }
@@ -25,6 +25,8 @@ class KeyboardAgent:
         for key in pressed:
             action[VelocityControlEnv.VELOCITY] += self.cmds[key][0:2]
             action[VelocityControlEnv.ANGULAR_V] += self.cmds[key][2]
-        action[VelocityControlEnv.VELOCITY] = self.xy_speed * action[VelocityControlEnv.VELOCITY] / np.linalg.norm(action[VelocityControlEnv.VELOCITY])
-        action[VelocityControlEnv.ANGULAR_V] = self.a_speed * action[VelocityControlEnv.ANGULAR_V]
+        norm = np.linalg.norm(action[VelocityControlEnv.VELOCITY])
+        if norm > 1e-5:
+            action[VelocityControlEnv.VELOCITY] = self.xy_speed * action[VelocityControlEnv.VELOCITY] / norm
+        action[VelocityControlEnv.ANGULAR_V] = np.array([self.a_speed * action[VelocityControlEnv.ANGULAR_V]])
         return action

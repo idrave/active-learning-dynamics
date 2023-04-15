@@ -13,7 +13,6 @@ class TopicServer(ABC):
     """
     When callback is called, it will set the event.
     When the get_state is called, the event is cleared
-    Subclasses must call the callback and get_state methods at the beggining of their respective overriden methods.
     """
     def __init__(self, name):
         self.name = name
@@ -21,13 +20,11 @@ class TopicServer(ABC):
         self.lock = Lock()
         self.recent = None
 
-    @abstractmethod
     def callback(self, info):
         with self.lock:
             self.recent = info
             self.event.set()
     
-    @abstractmethod
     def get_state(self, blocking=True, timeout=None):
         """
         Returns the latest information received.
@@ -343,7 +340,7 @@ class ChassisSubAbs(ABC):
             'velocity': self.velocity_sub.get_state(blocking=blocking),
             'imu': self.imu_sub.get_state(blocking=blocking),
             'mode': None, # TODO
-            'velocity': self.velocity_sub.to_dict(blocking=blocking)
+            'velocity': self.velocity_sub.get_state(blocking=blocking)
         }
 
     def to_dict(self):
@@ -376,7 +373,11 @@ class VelocityActionSub(TopicServer):
         super().callback(info)
 
     def get_state(self, blocking=True, timeout=None):
-        vx, vy, vz = super().get_state(blocking=blocking, timeout=timeout)
+        action = super().get_state(blocking=blocking, timeout=timeout)
+        if action is None:
+            vx, vy, vz = 0, 0, 0
+        else:
+            vx, vy, vz = action
         return {
             'vx': vx,
             'vy': vy,
@@ -385,6 +386,7 @@ class VelocityActionSub(TopicServer):
 
 class MazeMarginChecker(TopicServer):
     def __init__(self, chassis, position_srv: PositionSub, attitude_srv: AttitudeSub, command_sub: VelocityActionSub, maze: Maze, freq=20) -> None:
+        super().__init__('maze_margin')
         self.chassis = chassis
         self.commands = command_sub
         self.maze = maze
@@ -394,31 +396,39 @@ class MazeMarginChecker(TopicServer):
         self.__started = False
         self.__thread = None
     
-    def __drive_speed(self, x, y, z, vx, vy, vz):
+    def drive_speed(self, x, y, z, vx, vy, vz):
         v_valid = self.maze.valid_move((x,y), z, (vx, vy))
         if v_valid:
             self.chassis.drive_speed(vx, vy, vz)
         else:
             self.chassis.drive_speed(0, 0, vz)
+        logger.debug('Position (%.2f %.2f %.2f) Action (%.1f %.1f %.1f) Allowed %s' % (x, y, z, vx, vy, vz, v_valid))
         return v_valid
     
     def __run(self):
         while self.__started:
             action = self.commands.get_state(timeout=1/self.freq)
             position = self.position_srv.get_state(blocking=False)
-            angle = -self.attitude_srv.get_state(blocking=False)['yaw']
+            angle = self.attitude_srv.get_state(blocking=False)['yaw']
             x, y = position['x'], position['y']
             vx, vy, vz = action['vx'], action['vy'], action['vz']
-            v_valid = self.__drive_speed(x, y, angle, vx, vy, vz)
+            v_valid = self.drive_speed(x, y, angle, vx, vy, vz)
             self.callback(v_valid)
     
     def start(self):
         self.__started = True
         self.__thread = Thread(target=self.__run, daemon=True)
+        self.__thread.start()
 
     def join(self):
-        self.__started = False
-        self.__thread.join()
+        if self.__started:
+            self.__started = False
+            logger.debug('joining maze thread')
+            self.__thread.join()
+            logger.debug('joined maze thread')
+    
+    def callback(self, info):
+        return super().callback(info)
 
     def get_state(self, blocking=True, timeout=None):
         return {'v_valid': super().get_state(blocking, timeout=timeout)}

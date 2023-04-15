@@ -42,7 +42,7 @@ class Maze:
         if not isinstance(position, Point):
             position = Point(position)
         velocity = np.array(velocity)
-        velocity = Rotation.from_euler('z', angle).as_matrix()[:2, :2] @ velocity
+        velocity = Rotation.from_euler('z', angle, degrees=True).as_matrix()[:2, :2] @ velocity
         speed = np.linalg.norm(velocity)
         if speed < 1e-5:
             return True
@@ -51,7 +51,8 @@ class Maze:
             return True
         else:
             for side, normal in zip(self.get_sides(), self.__normals):
-                if LineString(side).dwithin(position, self.margin) and np.dot(normal, direction) > -1.e-4:
+                if np.dot(np.array(position.coords[0]) - np.array(side[0]), normal) > -self.margin \
+                        and np.dot(normal, direction) > -1.e-4:
                     return False
             return True
 

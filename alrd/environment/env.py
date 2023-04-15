@@ -28,11 +28,12 @@ class AbsEnv(gym.Env, ABC):
     MOTOR_SP = 'motor_speed'
     ARM_POSITION = 'arm_position'
     metadata = {}
-    def __init__(self, robot: robomaster.robot.Robot, subscriber: RobotSubAbs) -> None:
+    def __init__(self, robot: robomaster.robot.Robot, subscriber: RobotSubAbs, transforms=None) -> None:
         self.robot = robot
         self.subscriber = subscriber
         self.data_log = []
         self.last_reset_time = None
+        self.transforms = transforms if transforms is not None else []
         self._init_obs_space()
         self._init_action_space()
     
@@ -42,7 +43,7 @@ class AbsEnv(gym.Env, ABC):
             self.ANGLE: spaces.Box(-180.,180.),
             self.VELOCITY: spaces.Box(np.array([MIN_X_VEL, MIN_Y_VEL]),np.array([MAX_X_VEL, MAX_Y_VEL])),
             self.ANGULAR_V: spaces.Box(MIN_A_VEL, MAX_A_VEL),
-            self.ACCELERATION: spaces.Box(-np.inf, np.inf, shape=(2,)),
+            self.ACCELERATION: spaces.Box(-np.inf, np.inf, shape=(3,)),
             self.MOTOR_SP: spaces.Box(MIN_MOTOR_VEL, MAX_MOTOR_VEL, shape=(4,)),
             self.ARM_POSITION: spaces.Box(np.array([MIN_ARM_X, MIN_ARM_Y]), np.array([MAX_ARM_X, MAX_ARM_Y]))
         })
@@ -56,17 +57,20 @@ class AbsEnv(gym.Env, ABC):
         arm_state = subscriber_state['arm']
         return {
             self.POSITION: np.array([chassis_state['position']['x'], chassis_state['position']['y']]),
-            self.ANGLE: np.array([-chassis_state['attitude']['yaw']]),
+            self.ANGLE: np.array([chassis_state['attitude']['yaw']]),
             self.VELOCITY: np.array([chassis_state['velocity']['vgx'], chassis_state['velocity']['vgy']]),
             self.ANGULAR_V: np.array([chassis_state['imu']['gyro_z']]), # TODO: check gyro_z readings
-            self.ACCELERATION: np.array([chassis_state['imu']['acc_x'], chassis_state['imu']['acc_y']]),
+            self.ACCELERATION: np.array([chassis_state['imu']['acc_x'], chassis_state['imu']['acc_y'], chassis_state['imu']['acc_z']]),
             self.MOTOR_SP: np.array([chassis_state['esc']['speed']]),
             self.ARM_POSITION: np.array([arm_state['x'], arm_state['y']])
         }
 
     def _get_obs(self):
         subscriber_state = self.subscriber.get_state()
-        return self._subscriber_state_to_obs(subscriber_state)
+        obs = self._subscriber_state_to_obs(subscriber_state)
+        for transform in self.transforms:
+            obs = transform(obs)
+        return obs
     
     @abstractmethod
     def reset(self, seed=None, options=None):
@@ -105,11 +109,13 @@ class AbsEnv(gym.Env, ABC):
     def close(self):
         self.robot.chassis.drive_speed(0.,0.,0.,timeout=0.01)
         self.subscriber.unsubscribe()
+        logger.debug('Closing robot')
         self.robot.close()
+        logger.debug('Closed robot')
 
 class VelocityControlEnv(AbsEnv):
-    def __init__(self, robot, subscriber) -> None:
-        super().__init__(robot, subscriber)
+    def __init__(self, robot, subscriber, transforms=None) -> None:
+        super().__init__(robot, subscriber, transforms=transforms)
         
     def _init_action_space(self):
         self.action_space = spaces.Dict({
