@@ -1,5 +1,5 @@
-import gymnasium as gym
-from gymnasium import spaces
+import gym
+from gym import spaces
 from robomaster import robot
 from alrd.subscriber import RobotSubBox
 from alrd.environment.env import VelocityControlEnv, init_robot
@@ -22,19 +22,10 @@ class RobomasterEnv(VelocityControlEnv):
         self.data_log = []
         self.last_reset_time = None
         
-    def _init_obs_space(self):
-        super()._init_obs_space()
-        self.observation_space[self.OOB] = spaces.Discrete(2)
-
-    def _subscriber_state_to_obs(self, subscriber_state):
-        obs = super()._subscriber_state_to_obs(subscriber_state) 
-        obs[self.OOB] = subscriber_state['chassis']['position']['oob']
-        return obs
-    
     def get_subscriber_log(self):
         return self.subscriber.to_dict()
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None): #TODO fix for numpy state
         super().reset(seed=seed)
         self.robot.chassis.drive_speed(0.,0.,0.,timeout=0.01)
         self.data_log.append(self.subscriber.to_dict())

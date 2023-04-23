@@ -92,8 +92,8 @@ class EscSub(TopicServer):
         self.chassis.sub_esc(freq=freq, callback=self.callback)
     
     def callback(self, info):
-        super().callback(info)
         speed, angle, timestamp, state = info
+        super().callback((speed, angle, timestamp, state))
         self.speed.append(speed)
         self.angle.append(angle)
         self.timestamp.append(timestamp)
@@ -317,6 +317,7 @@ class ChassisSubAbs(ABC):
         self.velocity_sub = VelocitySub(chassis, freq=freq)
         self.imu_sub = IMUSub(chassis, freq=freq)
         self.position_sub = position_sub
+        self.freq = freq
     
     def unsubscribe(self):
         self.attribute_sub.unsubscribe()
@@ -516,11 +517,11 @@ class RobotSubAbs(ABC):
         self.gripper_sub.reset()
         self.arm_sub.reset()
         
-    def get_state(self):
+    def get_state(self, blocking=True, timeout=None):
         return {
-            'chassis': self.chassis_sub.get_state(),
-            'gripper': self.gripper_sub.get_state(),
-            'arm': self.arm_sub.get_state()
+            'chassis': self.chassis_sub.get_state(blocking=blocking, timeout=timeout),
+            'gripper': self.gripper_sub.get_state(blocking=blocking, timeout=timeout),
+            'arm': self.arm_sub.get_state(blocking=blocking, timeout=timeout)
         }
 
     def to_dict(self):
