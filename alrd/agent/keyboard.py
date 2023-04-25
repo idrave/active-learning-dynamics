@@ -1,8 +1,9 @@
 from alrd.environment.env import VelocityControlEnv
 from alrd.ui import KeyboardListener
+from alrd.agent.absagent import Agent
 import numpy as np
 
-class KeyboardAgent:
+class KeyboardAgent(Agent):
     def __init__(self, xy_speed, a_speed) -> None:
         self.listener = KeyboardListener()
         self.xy_speed = xy_speed
@@ -16,17 +17,13 @@ class KeyboardAgent:
             'e': (0, 0, -1)
         }
 
-    def sample_action(self, obs):
-        pressed = self.listener.which_pressed(self.cmds.keys())
-        action = {
-            VelocityControlEnv.VELOCITY: np.array([0, 0]),
-            VelocityControlEnv.ANGULAR_V: 0
-        }
+    def act(self, obs):
+        pressed = list(self.listener.which_pressed(self.cmds.keys()))
+        action = np.zeros(3)
         for key in pressed:
-            action[VelocityControlEnv.VELOCITY] += self.cmds[key][0:2]
-            action[VelocityControlEnv.ANGULAR_V] += self.cmds[key][2]
-        norm = np.linalg.norm(action[VelocityControlEnv.VELOCITY])
+            action += self.cmds[key]
+        norm = np.linalg.norm(action[:2])
         if norm > 1e-5:
-            action[VelocityControlEnv.VELOCITY] = self.xy_speed * action[VelocityControlEnv.VELOCITY] / norm
-        action[VelocityControlEnv.ANGULAR_V] = np.array([self.a_speed * action[VelocityControlEnv.ANGULAR_V]])
+            action[:2] = self.xy_speed * action[:2] / norm
+        action[2] = self.a_speed * action[2]
         return action

@@ -1,5 +1,5 @@
 import json
-from gymnasium import spaces
+from gym import spaces
 from threading import Event, Lock, Thread
 from abc import ABC, abstractmethod
 import numpy as np
@@ -386,7 +386,7 @@ class VelocityActionSub(TopicServer):
         }
 
 class MazeMarginChecker(TopicServer):
-    def __init__(self, chassis, position_srv: PositionSub, attitude_srv: AttitudeSub, command_sub: VelocityActionSub, maze: Maze, freq=20) -> None:
+    def __init__(self, chassis, position_srv: PositionSub, attitude_srv: AttitudeSub, command_sub: VelocityActionSub, maze: Maze, slide_wall=True, freq=20) -> None:
         super().__init__('maze_margin')
         self.chassis = chassis
         self.commands = command_sub
@@ -396,15 +396,18 @@ class MazeMarginChecker(TopicServer):
         self.freq = freq
         self.__started = False
         self.__thread = None
+        self.slide_wall = slide_wall
     
-    def drive_speed(self, x, y, z, vx, vy, vz):
-        v_valid = self.maze.valid_move((x,y), z, (vx, vy))
-        if v_valid:
-            self.chassis.drive_speed(vx, vy, vz)
+    def check_action(self, x, y, z, vx, vy, vz):
+        if self.slide_wall:
+            v_xy_valid = self.maze.clamp_direction((x,y), z, (vx, vy))
         else:
-            self.chassis.drive_speed(0, 0, vz)
-        logger.debug('Position (%.2f %.2f %.2f) Action (%.1f %.1f %.1f) Allowed %s' % (x, y, z, vx, vy, vz, v_valid))
-        return v_valid
+            v_valid = self.maze.valid_move((x,y), z, (vx, vy))
+            if v_valid:
+                v_xy_valid = (vx, vy)
+            else:
+                v_xy_valid = (0, 0)
+        return np.array([v_xy_valid[0],v_xy_valid[1],vz])
     
     def __run(self):
         while self.__started:

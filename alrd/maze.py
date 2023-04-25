@@ -2,10 +2,10 @@ from shapely import Polygon,LineString, Point, dwithin, is_ccw
 import numpy as np
 from copy import deepcopy
 from scipy.spatial.transform import Rotation 
+from alrd.utils import rotate_2d_vector
 
 class Maze:
     def __init__(self, points, margin=0.22) -> None:
-        # TODO: check if points are in clockwise order
         self.shape = Polygon(points)
         assert self.shape.is_valid, "Maze shape is not valid polygon"
         assert not is_ccw(self.shape.exterior), "Maze vertices must be supplied in clockwise order"
@@ -42,7 +42,7 @@ class Maze:
         if not isinstance(position, Point):
             position = Point(position)
         velocity = np.array(velocity)
-        velocity = Rotation.from_euler('z', angle, degrees=True).as_matrix()[:2, :2] @ velocity
+        velocity = rotate_2d_vector(velocity, angle)
         speed = np.linalg.norm(velocity)
         if speed < 1e-5:
             return True
@@ -56,14 +56,16 @@ class Maze:
                     return False
             return True
 
-    def clamp_direction(self, position, direction):
+    def clamp_direction(self, position, angle, velocity):
         if not isinstance(position, Point):
             position = Point(position)
+        velocity = np.array(velocity)
+        velocity = rotate_2d_vector(velocity, angle)
         if self.is_inside(position):
-            return direction
+            return velocity
         else:
             for side, normal in zip(self.get_sides(), self.__normals):
-                if LineString(side).dwithin(position, self.margin) and np.dot(normal, direction) > 0.0:
-                    proj = np.dot(normal, direction)
-                    direction -= proj * normal
-            return direction
+                if np.dot(np.array(position.coords[0]) - np.array(side[0]), normal) > -self.margin and np.dot(normal, velocity) > 0.0:
+                    proj = np.dot(normal, velocity)
+                    velocity -= proj * normal
+            return rotate_2d_vector(velocity, -angle)

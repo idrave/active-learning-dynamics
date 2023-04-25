@@ -7,10 +7,10 @@ required = [
     'netifaces >= 0.10',
     'myqr >= 2.3',
     'robomaster >= 0.1.1.68',
-    'gymnasium >= 0.27.1',
     'scikit-learn >= 1.0.2',
-    'scipy >= 1.7.3'
-] # TODO: check if anything is missing
+    'scipy >= 1.7.3',
+    'gym>=0.26.0'
+] 
 
 extras = {}
 setup(

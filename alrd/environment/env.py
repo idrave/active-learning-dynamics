@@ -33,15 +33,15 @@ class AbsEnv(gym.Env, ABC):
         self.robot = robot
         self.subscriber = subscriber
         self.data_log = []
-        self.transforms = transforms if transforms is not None else []
+        self.transforms = transforms if transforms is not None else [] # TODO transforms could be wrappers
         self._init_obs_space()
         self._init_action_space()
         self.period = 1./subscriber.freq
         self.last_action_time = None
     
     def _init_obs_space(self):
-        self.observation_space = spaces.Box([-np.inf, -np.inf, -180, MIN_X_VEL, MIN_Y_VEL, MIN_A_VEL], 
-                                            [np.inf, np.inf, 180, MAX_X_VEL, MAX_Y_VEL, MAX_A_VEL])
+        self.observation_space = spaces.Box(np.array([-np.inf, -np.inf, -180, MIN_X_VEL, MIN_Y_VEL, MIN_A_VEL]), 
+                                            np.array([np.inf, np.inf, 180, MAX_X_VEL, MAX_Y_VEL, MAX_A_VEL]))
 
     @abstractmethod
     def _init_action_space(self):
@@ -55,8 +55,8 @@ class AbsEnv(gym.Env, ABC):
             chassis_state['imu']['gyro_z']                                      # angular velocity
         ])
 
-    def _get_obs(self):
-        subscriber_state = self.subscriber.get_state(blocking=False)
+    def _get_obs(self, blocking=False):
+        subscriber_state = self.subscriber.get_state(blocking=blocking)
         obs = self._subscriber_state_to_obs(subscriber_state)
         for transform in self.transforms:
             obs = transform(obs)
@@ -99,7 +99,7 @@ class AbsEnv(gym.Env, ABC):
         else:
                 
             self._apply_action(action)
-        sleep_ms(self.period*1000)
+        time.sleep(self.period)
         # get new observation after period has passed
         obs = self._get_obs()
         reward = self.get_reward(obs)
@@ -107,12 +107,15 @@ class AbsEnv(gym.Env, ABC):
         info = {'action_valid': action_valid, 'step_time': time.time()-start, 'elapsed_last_step': elapsed}
         return obs, reward, terminated, truncated, info
     
+    def stop_robot(self):
+        self.robot.chassis.drive_wheels()
+    
 class VelocityControlEnv(AbsEnv):
     def __init__(self, robot, subscriber, transforms=None) -> None:
         super().__init__(robot, subscriber, transforms=transforms)
         
     def _init_action_space(self):
-        self.action_space = spaces.Box([MIN_X_VEL, MIN_Y_VEL, MIN_A_VEL], [MAX_X_VEL, MAX_Y_VEL, MAX_A_VEL])
+        self.action_space = spaces.Box(np.array([MIN_X_VEL, MIN_Y_VEL, MIN_A_VEL]), np.array([MAX_X_VEL, MAX_Y_VEL, MAX_A_VEL]))
 
     def is_action_valid(self, action):
         try:
@@ -122,6 +125,9 @@ class VelocityControlEnv(AbsEnv):
             return False
     
     def _apply_action(self, action):
+        if np.allclose(action, 0, atol=1e-4):
+            self.robot.chassis.drive_wheels()
+            return
         vel = action[:2]
         ang_vel = action[2]
         self.robot.chassis.drive_speed(vel[0].item(), vel[1].item(), ang_vel.item())
