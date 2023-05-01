@@ -57,15 +57,19 @@ class Maze:
             return True
 
     def clamp_direction(self, position, angle, velocity):
+        """
+        Returns velocity "clamped" in such a way that it does not go through the maze walls given the current position.
+        :param position: robot position (x,y)
+        :param angle: robot angle (degrees)
+        :param velocity: robot velocity (vx,vy). vx is forward and vy is lateral movement
+        """
         if not isinstance(position, Point):
             position = Point(position)
         velocity = np.array(velocity)
         velocity = rotate_2d_vector(velocity, angle)
-        if self.is_inside(position):
-            return velocity
-        else:
-            for side, normal in zip(self.get_sides(), self.__normals):
-                if np.dot(np.array(position.coords[0]) - np.array(side[0]), normal) > -self.margin and np.dot(normal, velocity) > 0.0:
-                    proj = np.dot(normal, velocity)
-                    velocity -= proj * normal
-            return rotate_2d_vector(velocity, -angle)
+        for side, normal in zip(self.get_sides(), self.__normals):
+            #if np.dot(np.array(position.coords[0]) - np.array(side[0]), normal) > -self.margin and np.dot(normal, velocity) > 0.0:
+            if LineString(side).dwithin(position, self.margin) and np.dot(normal, velocity) > 0.0:
+                proj = np.dot(normal, velocity)
+                velocity -= proj * normal
+        return rotate_2d_vector(velocity, -angle)

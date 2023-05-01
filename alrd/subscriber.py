@@ -29,12 +29,11 @@ class TopicServer(ABC):
         """
         Returns the latest information received.
         If blocking is True, waits if no information has been received since the last blocking call.
-        Non-blocking calls do not affect whether blocking calls should wait for new information.
         If timeout is a positive floating number, the method waits at most such number of seconds and returns the latest value available.
         """
         if blocking:
             self.event.wait(timeout=timeout)
-        with self.lock:
+        with self.lock: # TODO should nonblocking lock?
             info = self.recent
             if blocking:
                 self.event.clear()

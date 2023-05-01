@@ -40,8 +40,8 @@ class AbsEnv(gym.Env, ABC):
         self.last_action_time = None
     
     def _init_obs_space(self):
-        self.observation_space = spaces.Box(np.array([-np.inf, -np.inf, -180, MIN_X_VEL, MIN_Y_VEL, MIN_A_VEL]), 
-                                            np.array([np.inf, np.inf, 180, MAX_X_VEL, MAX_Y_VEL, MAX_A_VEL]))
+        self.observation_space = spaces.Box(np.array([MIN_X, MIN_Y, -180, MIN_X_VEL, MIN_Y_VEL, MIN_A_VEL]), 
+                                            np.array([MAX_X, MAX_Y, 180, MAX_X_VEL, MAX_Y_VEL, MAX_A_VEL]))
 
     @abstractmethod
     def _init_action_space(self):

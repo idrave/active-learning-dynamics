@@ -1,11 +1,15 @@
 from alrd.maze import Maze
 from alrd.subscriber import RobotSub, MazeMarginChecker, VelocityActionSub, ChassisSub
 from alrd.environment.env import init_robot, VelocityControlEnv
+from mbse.utils.replay_buffer import Transition
 from robomaster.robot import Robot
 from gym import spaces
 import numpy as np
 import time
 import logging
+from mbse.models.reward_model import RewardModel
+import jax
+import jax.numpy as jnp
 
 logger = logging.getLogger(__file__)
 
@@ -61,10 +65,32 @@ class MazeEnv(VelocityControlEnv):
         super().reset(seed, options)
         obs = self._get_obs()
         self.__origin += obs[:3]
+        obs = self._get_obs()
         logger.info(f'Reset position: {obs[:3]}')
         self.subscriber.reset()
-        self.__last_pos_angle = self._get_obs()[:3]
+        self.__last_pos_angle = obs[:3]
         return obs, {}
 
     def get_subscriber_log(self):
         return self.subscriber.to_dict()
+
+class MazeReward(RewardModel):
+    def __init__(self, goal_pos, maze: Maze):
+        self.goal_pos = jnp.array(goal_pos)
+        self.maze = maze
+        self._init_fn()
+    
+    def _init_fn(self):
+        def _predict(obs, action, goal_pos, next_obs=None, rng=None):
+            pos = obs[:2]
+            reward = -jnp.linalg.norm(pos - goal_pos) ** 2
+            return reward
+        def predict(obs, action, next_obs=None, rng=None):
+            return _predict(obs, action, self.goal_pos, next_obs, rng)
+        self.predict = jax.jit(predict)
+    
+    def train_step(self, tran: Transition):
+        raise NotImplementedError
+    
+    def set_bounds(self, max_action, min_action=None):
+        raise NotImplementedError
