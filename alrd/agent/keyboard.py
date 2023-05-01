@@ -13,8 +13,8 @@ class KeyboardAgent(Agent):
             'a': (0, -1, 0),
             's': (-1, 0, 0),
             'd': (0, 1, 0),
-            'q': (0, 0, 1),
-            'e': (0, 0, -1)
+            'q': (0, 0, -1),
+            'e': (0, 0, 1)
         }
 
     def act(self, obs):
@@ -26,4 +26,18 @@ class KeyboardAgent(Agent):
         if norm > 1e-5:
             action[:2] = self.xy_speed * action[:2] / norm
         action[2] = self.a_speed * action[2]
+        return action
+
+class KeyboardGPAgent(Agent):
+    def __init__(self, gp_agent, xy_speed, a_speed) -> None:
+        super().__init__()
+        self.gp_agent = gp_agent
+        self.kb_agent = KeyboardAgent(xy_speed, a_speed)
+
+    def act(self, obs):
+        pressed = list(self.kb_agent.listener.which_pressed(['r']))
+        if len(pressed) > 0:
+            action = self.gp_agent.act(obs)
+        else:
+            action = self.kb_agent.act(obs)
         return action
