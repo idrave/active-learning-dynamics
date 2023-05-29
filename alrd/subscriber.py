@@ -9,7 +9,7 @@ from alrd.maze import Maze
 
 logger = logging.getLogger(__name__)
 
-class TopicServer(ABC):
+class TopicServer:
     """
     When callback is called, it will set the event.
     When the get_state is called, the event is cleared
@@ -25,19 +25,27 @@ class TopicServer(ABC):
             self.recent = info
             self.event.set()
     
-    def get_state(self, blocking=True, timeout=None):
+    def get_state(self, blocking=True, timeout=None, return_none=False):
         """
         Returns the latest information received.
         If blocking is True, waits if no information has been received since the last blocking call.
-        If timeout is a positive floating number, the method waits at most such number of seconds and returns the latest value available.
+        If timeout is a positive floating number, the method waits at most such number of seconds.
+        If return_none is False and the timeout passes, it returns the previous latest state, otherwise it returns None.
         """
         if blocking:
-            self.event.wait(timeout=timeout)
+            is_set = self.event.wait(timeout=timeout)
+            if not is_set and return_none:
+                return None
         with self.lock: # TODO should nonblocking lock?
             info = self.recent
             if blocking:
                 self.event.clear()
         return info
+    
+    def reset(self):
+        with self.lock:
+            self.recent = None
+            self.event.clear()
 
 
 class AttitudeSub(TopicServer):

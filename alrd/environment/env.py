@@ -108,7 +108,7 @@ class AbsEnv(gym.Env, ABC):
         return obs, reward, terminated, truncated, info
     
     def stop_robot(self):
-        self.robot.chassis.drive_wheels()
+        self.robot.chassis.drive_wheels(0,0,0,0)
     
 class VelocityControlEnv(AbsEnv):
     def __init__(self, robot, subscriber, transforms=None) -> None:

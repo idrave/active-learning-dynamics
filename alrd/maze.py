@@ -4,6 +4,40 @@ from copy import deepcopy
 from scipy.spatial.transform import Rotation 
 from alrd.utils import rotate_2d_vector
 
+def create_maze(margin=0.3):
+    p0 = np.array([-0.65, -0.77])
+    #diffs = np.array([
+    #    [0,1.6],
+    #    [1.6,0],
+    #    [0,1.6],
+    #    [2.1,0],
+    #    [0,-1.6],
+    #    [-1.5,0],
+    #    [0,-1.6],
+    #    [1.5,0],
+    #    [0,-1.6],
+    #    [-2.1,0],
+    #    [0,1.6],
+    #])
+    diffs = np.array([
+        [0,1.6],
+        [1.5,0],
+        [0,1.6],
+        [2.2,0],
+        [0,-1.6],
+        [-1.4,0],
+        [0,-1.6],
+        [1.4,0],
+        [0,-1.6],
+        [-2.2,0],
+        [0,1.6],
+    ])
+    points = [p0]
+    for d in diffs:
+        points.append(points[-1]+d)
+    coords = np.stack(points)
+    return Maze(coords, margin=margin)
+
 class Maze:
     def __init__(self, points, margin=0.22) -> None:
         self.shape = Polygon(points)
@@ -37,12 +71,12 @@ class Maze:
         Returns True if the robot is inside the maze with a certain margin, or if the velocity points away from the maze otherwise.
         :param position: robot position (x,y)
         :param angle: robot angle (degrees)
-        :param velocity: robot velocity (vx,vy). vx is forward and vy is lateral movement
+        :param velocity: robot velocity (vx,vy) in the global coordinate system
         """
         if not isinstance(position, Point):
             position = Point(position)
         velocity = np.array(velocity)
-        velocity = rotate_2d_vector(velocity, angle)
+        #velocity = rotate_2d_vector(velocity, angle)
         speed = np.linalg.norm(velocity)
         if speed < 1e-5:
             return True
@@ -51,8 +85,8 @@ class Maze:
             return True
         else:
             for side, normal in zip(self.get_sides(), self.__normals):
-                if np.dot(np.array(position.coords[0]) - np.array(side[0]), normal) > -self.margin \
-                        and np.dot(normal, direction) > -1.e-4:
+                if LineString(side).dwithin(position, self.margin) \
+                        and np.dot(normal, direction) > 1.e-4:
                     return False
             return True
 
@@ -61,15 +95,25 @@ class Maze:
         Returns velocity "clamped" in such a way that it does not go through the maze walls given the current position.
         :param position: robot position (x,y)
         :param angle: robot angle (degrees)
-        :param velocity: robot velocity (vx,vy). vx is forward and vy is lateral movement
+        :param velocity: robot velocity (vx,vy) in the global coordinate system
         """
         if not isinstance(position, Point):
             position = Point(position)
         velocity = np.array(velocity)
-        velocity = rotate_2d_vector(velocity, angle)
-        for side, normal in zip(self.get_sides(), self.__normals):
-            #if np.dot(np.array(position.coords[0]) - np.array(side[0]), normal) > -self.margin and np.dot(normal, velocity) > 0.0:
-            if LineString(side).dwithin(position, self.margin) and np.dot(normal, velocity) > 0.0:
-                proj = np.dot(normal, velocity)
-                velocity -= proj * normal
-        return rotate_2d_vector(velocity, -angle)
+        #velocity = rotate_2d_vector(velocity, angle)
+        if not self.shape.contains(position):
+            velocity = np.zeros_like(velocity)
+            for side, normal in zip(self.get_sides(), self.__normals):
+                if LineString(side).dwithin(position, self.margin):
+                    velocity -= normal
+            norm = np.linalg.norm(velocity)
+            if norm > 1e-5:
+                velocity = velocity / np.linalg.norm(velocity)
+        else:
+            for side, normal in zip(self.get_sides(), self.__normals):
+                #if np.dot(np.array(position.coords[0]) - np.array(side[0]), normal) > -self.margin and np.dot(normal, velocity) > 0.0:
+                if LineString(side).dwithin(position, self.margin) and np.dot(normal, velocity) > 0.0:
+                    proj = np.dot(normal, velocity)
+                    velocity -= proj * normal
+        #return rotate_2d_vector(velocity, -angle)
+        return velocity

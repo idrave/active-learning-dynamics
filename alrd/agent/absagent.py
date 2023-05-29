@@ -6,5 +6,8 @@ class Agent(ABC):
         pass
 
     @abstractmethod
-    def act(obs: np.ndarray) -> np.ndarray:
+    def act(self, obs: np.ndarray) -> np.ndarray:
+        pass
+
+    def reset(self):
         pass

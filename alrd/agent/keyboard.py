@@ -2,9 +2,10 @@ from alrd.environment.env import VelocityControlEnv
 from alrd.ui import KeyboardListener
 from alrd.agent.absagent import Agent
 import numpy as np
+from alrd.utils import rotate_2d_vector
 
 class KeyboardAgent(Agent):
-    def __init__(self, xy_speed, a_speed) -> None:
+    def __init__(self, xy_speed, a_speed, global_act=False, cossin=False, noangle=False) -> None:
         self.listener = KeyboardListener()
         self.xy_speed = xy_speed
         self.a_speed = a_speed
@@ -16,6 +17,9 @@ class KeyboardAgent(Agent):
             'q': (0, 0, -1),
             'e': (0, 0, 1)
         }
+        self.global_act = global_act
+        self.cossin = cossin
+        self.noangle = noangle
 
     def act(self, obs):
         pressed = list(self.listener.which_pressed(self.cmds.keys()))
@@ -26,6 +30,8 @@ class KeyboardAgent(Agent):
         if norm > 1e-5:
             action[:2] = self.xy_speed * action[:2] / norm
         action[2] = self.a_speed * action[2]
+        if self.noangle:
+            action = action[:2]
         return action
 
 class KeyboardGPAgent(Agent):
