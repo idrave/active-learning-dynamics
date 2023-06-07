@@ -15,7 +15,7 @@ class AgentType(Enum):
     
     def __call__(self, args):
         if self == AgentType.KEYBOARD:
-            return KeyboardAgent(xy_speed=1, a_speed=1, global_act=args.global_frame, cossin=args.cossin, noangle=args.noangle)
+            return KeyboardAgent(xy_speed=args.xy_speed, a_speed=args.a_speed, noangle=args.noangle)
         elif self == AgentType.KEYBOARD_GP:
             gp_agent = create_async_rbf_gp_agent(
                 length_scale=args.length_scale,

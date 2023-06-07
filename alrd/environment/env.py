@@ -38,6 +38,11 @@ class AbsEnv(gym.Env, ABC):
         self._init_action_space()
         self.period = 1./subscriber.freq
         self.last_action_time = None
+        self.__origin = None
+        obs = self._get_obs(blocking=True)
+        obs = self._get_obs() # for some reason the first observation is bugged sometimes
+        self.__origin = obs[:3]
+        self._last_obs = obs
     
     def _init_obs_space(self):
         self.observation_space = spaces.Box(np.array([MIN_X, MIN_Y, -180, MIN_X_VEL, MIN_Y_VEL, MIN_A_VEL]), 
@@ -60,12 +65,40 @@ class AbsEnv(gym.Env, ABC):
         obs = self._subscriber_state_to_obs(subscriber_state)
         for transform in self.transforms:
             obs = transform(obs)
+        if self.__origin is not None:
+            obs[:3] -= self.__origin
         return obs
     
-    @abstractmethod
     def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
+        super().reset(seed=seed, options=options)
         self.last_action_time = None
+        logger.info('called reset')
+        self.stop_robot()
+        time.sleep(0.5)
+        obs = self._get_obs()
+        logger.info(f'reseting from {obs}')
+        self.robot.chassis.drive_speed(z=-np.sign(obs[2])*60)
+        time.sleep(np.abs(obs[2])/60)
+        norm = np.linalg.norm(obs[:2])
+        if norm > 1e-5:
+            self.robot.chassis.drive_speed(x=-0.5 * obs[0]/norm,y=-0.5 * obs[1]/norm)
+            time.sleep(2 * norm)
+        self.stop_robot()
+        done = False
+        while not done:
+            s = input('Please reset the robot to the desired position and enter "yes" to continue...')
+            if s == 'yes':
+                done = True
+            else:
+                print('Invalid input. Please enter "yes" to continue...')
+        time.sleep(2*self.period)
+        obs = self._get_obs()
+        self.__origin += obs[:3]
+        obs = self._get_obs()
+        logger.info(f'Reset position: {obs[:3]}')
+        self.subscriber.reset()
+        self._last_obs = obs
+        return obs, {}
     
     def get_reward(self, obs):
         return 0.
@@ -94,21 +127,35 @@ class AbsEnv(gym.Env, ABC):
             elapsed = 0
         self.last_action_time = time.time()
         if not action_valid:
+            logger.warning(f'action {action} is invalid. action space is {self.action_space}')
             self.robot.chassis.drive_wheels(timeout=0.01)
             truncated = True
         else:
-                
             self._apply_action(action)
-        time.sleep(self.period)
         # get new observation after period has passed
         obs = self._get_obs()
         reward = self.get_reward(obs)
         terminated = self.is_terminating(obs)
         info = {'action_valid': action_valid, 'step_time': time.time()-start, 'elapsed_last_step': elapsed}
+        self._last_obs = obs
         return obs, reward, terminated, truncated, info
     
     def stop_robot(self):
         self.robot.chassis.drive_wheels(0,0,0,0)
+    
+class FrameMixin(AbsEnv):
+    def __init__(self, global_act=False, *args, **kwargs):
+        """
+        Action must be an array. Rotates the first two entries according to last angle if the actions must be in global frame 
+        """
+        super().__init__(*args, **kwargs)
+        self.global_frame = global_act
+    
+    def step(self, action: np.ndarray):
+        if self.global_frame:
+            action[:2] = rotate_2d_vector(action[:2], -self._last_obs[2])
+        result = super().step(action)
+        return result
     
 class VelocityControlEnv(AbsEnv):
     def __init__(self, robot, subscriber, transforms=None) -> None:
@@ -131,3 +178,34 @@ class VelocityControlEnv(AbsEnv):
         vel = action[:2]
         ang_vel = action[2]
         self.robot.chassis.drive_speed(vel[0].item(), vel[1].item(), ang_vel.item())
+        time.sleep(self.period)
+
+class PositionControlEnv(AbsEnv):
+    X_DELTA = 0.5
+    Y_DELTA = 0.5
+    A_DELTA = 60
+    def __init__(self, robot, subscriber, transforms=None, xy_speed=2., a_speed=120) -> None:
+        super().__init__(robot, subscriber, transforms=transforms)
+        self.xy_speed = xy_speed
+        self.a_speed = a_speed
+    
+    def _init_action_space(self):
+        self.action_space = spaces.Box(np.array([-self.X_DELTA, -self.Y_DELTA, -self.A_DELTA]), np.array([self.X_DELTA, self.Y_DELTA, self.A_DELTA]))
+
+    def is_action_valid(self, action):
+        try:
+            return action.shape == self.action_space.shape
+        except:
+            logger.error(traceback.format_exc())
+            return False
+    
+    def _apply_action(self, action):
+        if np.allclose(action, 0, atol=1e-4):
+            self.robot.chassis.drive_wheels()
+            return
+        start = time.time()
+        cmd = self.robot.chassis.move(x=action[0].item(), y=action[1].item(), z=action[2].item(), xy_speed=self.xy_speed, z_speed=self.a_speed)
+        cmd.wait_for_completed(timeout=self.period)
+        time_passed = time.time() - start
+        if self.period - time_passed > 0:
+            time.sleep(self.period - time_passed)
