@@ -1,6 +1,6 @@
 from alrd.maze import Maze
 from alrd.subscriber import RobotSub, MazeMarginChecker, VelocityActionSub, ChassisSub
-from alrd.environment.env import init_robot, AbsEnv, VelocityControlEnv, PositionControlEnv
+from alrd.environment.env import init_robot, BaseRobomasterEnv, VelocityControlEnv, PositionControlEnv, BaseEnvAccel
 from mbse.utils.replay_buffer import Transition
 from robomaster.robot import Robot
 from gym import spaces
@@ -30,7 +30,7 @@ def create_maze_goal_env(goal, coordinates=None, margin=0.22, freq=50, slide_wal
         maze = Maze(coordinates, margin=margin)
     return MazeGoalEnv(_robot, subscriber, maze, goal, slide_wall=slide_wall, transforms=transforms, global_act=global_act)
 
-class MazeEnv(AbsEnv):
+class MazeEnv(BaseRobomasterEnv):
     def __init__(self, robot: Robot, subscriber: ChassisSub, maze: Maze, slide_wall=True, **kwargs) -> None:
         super().__init__(robot, subscriber, **kwargs)
         self.__velocity_cmd_sub = VelocityActionSub()
@@ -103,3 +103,9 @@ class MazeGoalPositionEnv(MazeGoalEnv, PositionControlEnv):
     @staticmethod
     def create_env(goal, freq=50, coordinates=None, margin=0.22, slide_wall=False, transforms=None, xy_speed=0.5, a_speed=120.):
         return MazeGoalPositionEnv._create_maze_goal_env(goal, freq, coordinates, margin, slide_wall, transforms, xy_speed=xy_speed, a_speed=a_speed)
+
+class MazeGoalKinemEnv(MazeGoalEnv, VelocityControlEnv, BaseEnvAccel):
+    # mro: MazeGoalEnv, MazeEnv, VelocityControlEnv, AbsEnv
+    @staticmethod
+    def create_env(goal, freq=50, coordinates=None, margin=0.22, slide_wall=False, transforms=None):
+        return MazeGoalKinemEnv._create_maze_goal_env(goal, freq, coordinates, margin, slide_wall, transforms)

@@ -8,7 +8,7 @@ from gym.wrappers.rescale_action import RescaleAction
 import numpy as np
 import time
 from alrd.utils import get_timestamp_str, convert_to_cos_sin
-from alrd.environment import AbsEnv, create_robomaster_env
+from alrd.environment import BaseRobomasterEnv, create_robomaster_env
 from alrd.environment.maze import MazeGoalVelocityEnv, MazeGoalPositionEnv
 from alrd.agent import Agent, RandomGPAgent, KeyboardAgent, AgentType
 from alrd.agent.repeat import RepeatAgent
@@ -27,7 +27,7 @@ import tqdm
 
 logger = logging.getLogger(__file__)
 
-def close_and_save(env: AbsEnv, buffer: ReplayBuffer, truncated_vec, info_list, output_dir):
+def close_and_save(env: BaseRobomasterEnv, buffer: ReplayBuffer, truncated_vec, info_list, output_dir):
     env.stop_robot()
     env.close()
     env.subscriber.unsubscribe()
@@ -37,6 +37,7 @@ def close_and_save(env: AbsEnv, buffer: ReplayBuffer, truncated_vec, info_list, 
     open(output_dir/'transitions.pickle', 'wb').write(pickle.dumps(buffer)) 
     open(output_dir/'truncated.pickle', 'wb').write(pickle.dumps(truncated_vec)) 
     open(output_dir/'info.json', 'w').write(json.dumps(info_list))
+    open(output_dir/'state_log.json', 'w').write(json.dumps(env.get_state_log()))
     print(f'Output {output_dir}')
 
 class HandleSignal:
@@ -63,12 +64,15 @@ def init_filter(freq, use_acc):
                             init_cov = 0.01 * np.diag([1, 1]),
                             use_acc=False, pred_displ=True)
 
-def collect_data_buffer(agent: Agent, env: AbsEnv, buffer, truncated_vec, info_list, max_steps, buffer_size):
+def collect_data_buffer(agent: Agent, env: BaseRobomasterEnv, buffer, truncated_vec, info_list, max_steps, buffer_size, use_tqdm):
     num_points = max_steps
     obs_space =  env.observation_space.shape
     action_space =  env.action_space.shape
     started = False
-    for step in tqdm.tqdm(range(buffer_size)):
+    it = range(buffer_size)
+    if use_tqdm:
+        it = tqdm.tqdm(it)
+    for step in it:
         if not started:
             count = 0
             obs, info = env.reset()
@@ -111,12 +115,14 @@ if __name__ == '__main__':
     logger.info('Collecting data')
     parser = argparse.ArgumentParser()
     parser.add_argument('--tag', type=str, default='')
+    parser.add_argument('--tqdm', action='store_true')
     parser.add_argument('-n', '--n_steps', default=100000, type=int, help='Number of steps to record')
     parser.add_argument('-e', '--episode_len', default=None, type=int, help='Maximum episode length')
     parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency of the environment')
     parser.add_argument('-a', '--agent', default=AgentType.KEYBOARD, type=AgentType, help='Agent to use', choices=[a for a in AgentType])
     # Environment arguments
     parser.add_argument('--poscontrol', action='store_true')
+    parser.add_argument('--raw_pos', action='store_true', help='Whether to use raw positon data instead of estimating from accelerometer')
     parser.add_argument('--square', action='store_true', help='Square environment')
     parser.add_argument('--cossin', action='store_true')
     parser.add_argument('--noangle', action='store_true')
@@ -142,6 +148,7 @@ if __name__ == '__main__':
     yaml.dump(vars(args), open(output_dir/'args.yaml', 'w'))
     env = create_robomaster_env(
         args.poscontrol,
+        not args.raw_pos,
         args.margin,
         args.freq,
         args.slide,
@@ -154,7 +161,7 @@ if __name__ == '__main__':
         args.xy_speed,
         args.a_speed
     )
-    print('obs', env.observation_space.shape)
+    print('env', type(env), 'obs', env.observation_space.shape)
     env = RescaleAction(env, min_action=-1, max_action=1)
     max_episode_steps = args.episode_len
     if max_episode_steps is not None:
@@ -181,7 +188,7 @@ if __name__ == '__main__':
     handler = HandleSignal(finish)
     try:
         collect_data_buffer(
-            agent, env, buffer, truncated_vec, info_list, max_episode_steps,  args.n_steps)
+            agent, env, buffer, truncated_vec, info_list, max_episode_steps,  args.n_steps, use_tqdm=args.tqdm)
     except Exception as e:
         traceback.print_exc()
     finally:

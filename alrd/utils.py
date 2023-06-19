@@ -9,7 +9,7 @@ from typing import Optional, Sequence, Callable
 import pickle
 
 def get_timestamp_str():
-    return datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 def get_transition_from_buffer(buffer: ReplayBuffer):
     t = Transition(

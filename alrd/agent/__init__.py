@@ -10,20 +10,25 @@ import pickle
 class AgentType(Enum):
     KEYBOARD = 'keyboard'
     KEYBOARD_GP = 'keyboard_gp'
+    KEYBOARD_GP_XY = 'keyboard_gp_xy'
     SAC = 'sac'
     ILQROPEN = 'ilqropen'
     
     def __call__(self, args):
         if self == AgentType.KEYBOARD:
             return KeyboardAgent(xy_speed=args.xy_speed, a_speed=args.a_speed, noangle=args.noangle)
-        elif self == AgentType.KEYBOARD_GP:
+        elif self == AgentType.KEYBOARD_GP or self == AgentType.KEYBOARD_GP_XY:
+            if self == AgentType.KEYBOARD_GP_XY:
+                scale = (args.xy_speed, args.xy_speed, 0.0)
+            else:
+                scale = (args.xy_speed, args.xy_speed, 0.5*args.a_speed/120.)
             gp_agent = create_async_rbf_gp_agent(
                 length_scale=args.length_scale,
                 noise=args.noise,
-                scale=(1, 1, 0.5),
+                scale=scale if not args.noangle else scale[:2],
                 max_steps=args.episode_len if args.episode_len is not None else args.freq * 60,
-                freq=args.freq, sample=args.gp_undersample, seed=args.seed)
-            return KeyboardGPAgent(gp_agent=gp_agent, xy_speed=1, a_speed=1)
+                freq=args.freq//(args.repeat_action if args.repeat_action is not None else 1), sample=args.gp_undersample, seed=args.seed)
+            return KeyboardGPAgent(gp_agent=gp_agent, xy_speed=args.xy_speed, a_speed=args.a_speed)
         elif self == AgentType.SAC:
             with open(args.agent_checkpoint, 'rb') as f:
                 checkpoint = pickle.load(f)

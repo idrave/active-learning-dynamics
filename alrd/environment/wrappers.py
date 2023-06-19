@@ -3,7 +3,7 @@ import gym
 from gym import spaces
 import logging
 import time
-from alrd.environment.env import AbsEnv
+from alrd.environment.env import BaseRobomasterEnv
 from alrd.utils import rotate_2d_vector
 from alrd.subscriber import ChassisSub
 from gym.core import Env
@@ -21,7 +21,7 @@ class CosSinObsWrapper(gym.ObservationWrapper):
         return np.array([x, y, np.cos(angle), np.sin(angle), x_vel, y_vel, a_vel])
 
 class GlobalFrameActionWrapper(gym.ActionWrapper):
-    def __init__(self, env: AbsEnv):
+    def __init__(self, env: BaseRobomasterEnv):
         super().__init__(env)
     
     def action(self, action):

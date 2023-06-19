@@ -1,14 +1,15 @@
-from alrd.environment.env import AbsEnv, init_robot, PositionControlEnv
-from alrd.environment.maze import MazeEnv, create_maze_env, MazeGoalEnv, MazeGoalPositionEnv, MazeGoalVelocityEnv
+from alrd.environment.env import BaseRobomasterEnv, init_robot, PositionControlEnv
+from alrd.environment.maze import MazeEnv, create_maze_env, MazeGoalEnv, MazeGoalPositionEnv, MazeGoalVelocityEnv, MazeGoalKinemEnv
 from alrd.environment.wrappers import GlobalFrameActionWrapper, CosSinObsWrapper, RemoveAngleActionWrapper, KeepObsWrapper, RepeatActionWrapper
 from alrd.subscriber import ChassisSub
 import numpy as np
 import time
 
-__all__ = ['AbsEnv', 'RobomasterEnv', 'create_maze_env', 'MazeEnv', 'init_robot', 'MazeGoalEnv', 'PositionControlEnv']
+__all__ = ['BaseRobomasterEnv', 'RobomasterEnv', 'create_maze_env', 'MazeEnv', 'init_robot', 'MazeGoalEnv', 'PositionControlEnv']
 GOAL = (2.5, 1.8)
 def create_robomaster_env(
         poscontrol=False,
+        estimate_from_acc=True,
         margin=0.3,
         freq=50,
         slide_wall=True,
@@ -39,7 +40,10 @@ def create_robomaster_env(
         transforms=transforms
     )
     if not poscontrol:
-        env = MazeGoalVelocityEnv.create_env(**env_kwargs)
+        if estimate_from_acc:
+            env = MazeGoalKinemEnv.create_env(**env_kwargs)
+        else:
+            env = MazeGoalVelocityEnv.create_env(**env_kwargs)
     else:
         env = MazeGoalPositionEnv.create_env(
             **env_kwargs,

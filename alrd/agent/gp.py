@@ -1,5 +1,4 @@
 import numpy as np
-from alrd.environment import RobomasterEnv
 from alrd.agent.absagent import Agent
 import scipy.interpolate
 from sklearn.gaussian_process import GaussianProcessRegressor

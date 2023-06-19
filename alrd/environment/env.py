@@ -20,7 +20,7 @@ def init_robot(conn_type='ap'):
     _robot.reset()
     return _robot
 
-class AbsEnv(gym.Env, ABC):
+class BaseRobomasterEnv(gym.Env, ABC):
     POSITION = 'position'
     ANGLE = 'angle'
     VELOCITY = 'velocity'
@@ -33,15 +33,16 @@ class AbsEnv(gym.Env, ABC):
         self.robot = robot
         self.subscriber = subscriber
         self.data_log = []
-        self.transforms = transforms if transforms is not None else [] # TODO transforms could be wrappers
+        self.transforms = transforms if transforms is not None else [] 
         self._init_obs_space()
         self._init_action_space()
         self.period = 1./subscriber.freq
         self.last_action_time = None
-        self.__origin = None
+        self._origin = None
+        self._state_log = []
         obs = self._get_obs(blocking=True)
         obs = self._get_obs() # for some reason the first observation is bugged sometimes
-        self.__origin = obs[:3]
+        self._origin = obs[:3]
         self._last_obs = obs
     
     def _init_obs_space(self):
@@ -51,6 +52,9 @@ class AbsEnv(gym.Env, ABC):
     @abstractmethod
     def _init_action_space(self):
         pass
+
+    def record_state(self, state):
+        self._state_log.append(state)
 
     def _subscriber_state_to_obs(self, chassis_state):
         return np.array([
@@ -62,11 +66,13 @@ class AbsEnv(gym.Env, ABC):
 
     def _get_obs(self, blocking=False):
         subscriber_state = self.subscriber.get_state(blocking=blocking)
-        obs = self._subscriber_state_to_obs(subscriber_state)
+        subscriber_state['time'] = time.time()
+        self.record_state(subscriber_state)
         for transform in self.transforms:
-            obs = transform(obs)
-        if self.__origin is not None:
-            obs[:3] -= self.__origin
+            subscriber_state = transform(subscriber_state)
+        obs = self._subscriber_state_to_obs(subscriber_state)
+        if self._origin is not None:
+            obs[:3] -= self._origin
         return obs
     
     def reset(self, seed=None, options=None):
@@ -93,12 +99,12 @@ class AbsEnv(gym.Env, ABC):
                 print('Invalid input. Please enter "yes" to continue...')
         time.sleep(2*self.period)
         obs = self._get_obs()
-        self.__origin += obs[:3]
+        self._origin += obs[:3]
         obs = self._get_obs()
         logger.info(f'Reset position: {obs[:3]}')
         self.subscriber.reset()
         self._last_obs = obs
-        return obs, {}
+        return obs, {'state_idx': len(self._state_log)-1}
     
     def get_reward(self, obs):
         return 0.
@@ -136,14 +142,53 @@ class AbsEnv(gym.Env, ABC):
         obs = self._get_obs()
         reward = self.get_reward(obs)
         terminated = self.is_terminating(obs)
-        info = {'action_valid': action_valid, 'step_time': time.time()-start, 'elapsed_last_step': elapsed}
+        info = {'action_valid': action_valid, 'step_time': time.time()-start, 'elapsed_last_step': elapsed,
+                'state_idx': len(self._state_log)-1}
         self._last_obs = obs
         return obs, reward, terminated, truncated, info
     
     def stop_robot(self):
         self.robot.chassis.drive_wheels(0,0,0,0)
+
+    def get_state_log(self):
+        return self._state_log
+
+class BaseEnvAccel(BaseRobomasterEnv):
+    def __init__(self, robot: robomaster.robot.Robot, subscriber: ChassisSub, transforms=None) -> None:
+        self._last_pos = np.zeros((3,))
+        self._last_vel = np.zeros((2,))
+        self._time_last_read = None
+        super().__init__(robot, subscriber, transforms)
+
+    def _subscriber_state_to_obs(self, chassis_state):
+        if self._time_last_read is None:
+            self._time_last_read = chassis_state['time']
+            return np.zeros((6,))
+        acc_x = chassis_state['imu']['acc_x']
+        acc_y = chassis_state['imu']['acc_y']
+        ang_vel = chassis_state['imu']['gyro_z']
+        time_delta = chassis_state['time'] - self._time_last_read
+        vel_x = self._last_vel[0] + time_delta * acc_x
+        vel_y = self._last_vel[1] + time_delta * acc_y
+        pos_x = self._last_pos[0] + time_delta * vel_x + 0.5 * time_delta ** 2 * acc_x 
+        pos_y = self._last_pos[0] + time_delta * vel_y + 0.5 * time_delta ** 2 * acc_y 
+        ang = self._last_pos[2] + time_delta * ang_vel
+        self._last_pos = np.array([pos_x, pos_y, ang])
+        self._last_vel = np.array([vel_x, vel_y])
+        self._time_last_read = chassis_state['time']
+        print('deltat %.3f x %.2f y %.2f vx %.2f vy %.2f ax %.2f ay %.2f'%(time_delta, pos_x, pos_y, vel_x, vel_y, acc_x, acc_y))
+        return np.array([*self._last_pos, *self._last_vel, ang_vel])
     
-class FrameMixin(AbsEnv):
+    def reset(self, seed=None, options=None):
+        _, info = super().reset(seed, options)
+        obs = np.zeros((6,))
+        self._origin = obs[:3]
+        self._last_obs = obs
+        self._last_pos = obs[:3]
+        self._last_vel = obs[3:5]
+        return obs, info
+
+class FrameMixin(BaseRobomasterEnv):
     def __init__(self, global_act=False, *args, **kwargs):
         """
         Action must be an array. Rotates the first two entries according to last angle if the actions must be in global frame 
@@ -157,7 +202,7 @@ class FrameMixin(AbsEnv):
         result = super().step(action)
         return result
     
-class VelocityControlEnv(AbsEnv):
+class VelocityControlEnv(BaseRobomasterEnv):
     def __init__(self, robot, subscriber, transforms=None) -> None:
         super().__init__(robot, subscriber, transforms=transforms)
         
@@ -180,7 +225,7 @@ class VelocityControlEnv(AbsEnv):
         self.robot.chassis.drive_speed(vel[0].item(), vel[1].item(), ang_vel.item())
         time.sleep(self.period)
 
-class PositionControlEnv(AbsEnv):
+class PositionControlEnv(BaseRobomasterEnv):
     X_DELTA = 0.5
     Y_DELTA = 0.5
     A_DELTA = 60
