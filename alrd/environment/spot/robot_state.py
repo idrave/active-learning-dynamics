@@ -8,11 +8,15 @@ class SpotState:
     
     @property
     def velocity_of_body_in_vision(self):
-        return self.state.kinematic_state.velocity_of_body_in_vision
+        linear_velocity = self.state.kinematic_state.velocity_of_body_in_vision.linear
+        angular_velocity = self.state.kinematic_state.velocity_of_body_in_vision.angular
+        return linear_velocity.x, linear_velocity.y, linear_velocity.z, angular_velocity.x, angular_velocity.y, angular_velocity.z
     
     @property
     def velocity_of_body_in_odom(self):
-        return self.state.kinematic_state.velocity_of_body_in_odom
+        linear_velocity = self.state.kinematic_state.velocity_of_body_in_odom.linear
+        angular_velocity = self.state.kinematic_state.velocity_of_body_in_odom.angular
+        return linear_velocity.x, linear_velocity.y, linear_velocity.z, angular_velocity.x, angular_velocity.y, angular_velocity.z
     
     @property
     def pose_of_body_in_vision(self):
@@ -39,11 +43,11 @@ class SpotState:
                 s += "}\n"
 
         s += "velocity_of_body_in_vision {\n"
-        s += str(self.velocity_of_body_in_vision)
+        s += str(self.state.kinematic_state.velocity_of_body_in_vision)
         s += "}\n"
 
         s += "velocity_of_body_in_odom {\n"
-        s += str(self.velocity_of_body_in_odom)
+        s += str(self.state.kinematic_state.velocity_of_body_in_odom)
         s += "}\n"
 
         odom_body_pose = self.pose_of_body_in_odom

@@ -43,8 +43,8 @@ MINY = -1.0
 MAXY = 1.0
 ##### Spot parameters #####
 MAX_SPEED = 1.6                     # Maximum linear velocity of the robot (m/s)
-MAX_ANGULAR_SPEED = 2.0             # Maximum angular velocity of the robot (rad/s). TODO check this value
-MARGIN = 0.15                       # Margin to the walls within which the robot is stopped (m)
+MAX_ANGULAR_SPEED = 1.5             # Maximum angular velocity of the robot (rad/s)
+MARGIN = 0.16                       # Margin to the walls within which the robot is stopped (m)
 MAX_TIMEOUT = MARGIN / MAX_SPEED    # Maximum time the boundary check will wait for state reading (s)
 STAND_TIMEOUT = 10.0                # Maximum time to wait for the robot to stand up (s)
 POSE_TIMEOUT = 10.0                 # Maximum time to wait for the robot to reach a pose (s)
@@ -53,7 +53,7 @@ READ_STATE_SLEEP_PERIOD = 0.01      # Period defining how often we check if a st
 STEPWAIT = 0.5                      # Maximum fraction of the command period to wait in step fucnction: TODO check this value
 #RESET_POS_TOLERANCE = 0.1 # tolerance for the robot to be considered in the reset position
 #RESET_ANGLE_TOLERANCE = np.pi/18 # tolerance for the robot to be considered in the reset angle
-COMMAND_DURATION = 0.6              # Duration of regular commands sent to spot (while not replaced by new command) (s)
+COMMAND_DURATION = 0.5              # Duration of regular commands sent to spot (while not replaced by new command) (s)
 SHUTDOWN_TIMEOUT = 10.0             # Maximum time to wait for the robot to shut down (s)
 STEP_TIMEOUT = COMMAND_DURATION     # Maximum time to wait for the environment to execute a step (s)
 MAX_MAIN_WAIT = 10.0                # TODO: specify this in class instead of here
@@ -88,7 +88,7 @@ class SpotGymBase(object):
         self.motors_powered = False
 
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
 
     def initialize_robot(self, hostname):
         """Initializes SDK from hostname.
@@ -574,7 +574,6 @@ class SpotGymStateMachine(SpotGymBase):
                         else:
                             self.__state = State.READY
                 elif request.action == StateMachineAction.CHECK_DONE:
-                    self.logger.debug('Check done')
                     check_ongoing = False
                     last_read = time.time()
                     if self.__state in {State.RUNNING, State.READY}:
@@ -687,8 +686,8 @@ class SpotGym(SpotGymStateMachine, gym.Env):
         truncate_on_timeout: If True, the episode will end when a robot command takes longer than STEP_TIMEOUT seconds.
         """
         super().__init__(monitor_freq=monitor_freq)
-        assert 1/monitor_freq < MAX_TIMEOUT, "Monitor frequency must be higher than 1/{} Hz to ensure safe navigation".format(MAX_TIMEOUT)
-        assert 1/cmd_freq < COMMAND_DURATION, "Command frequency must be higher than 1/COMMAND_DURATION ({} Hz) ".format(1/COMMAND_DURATION)
+        assert 1/monitor_freq <= MAX_TIMEOUT + 1e-5, "Monitor frequency must be higher than 1/{} Hz to ensure safe navigation".format(MAX_TIMEOUT)
+        assert 1/cmd_freq <= COMMAND_DURATION + 1e-5, "Command frequency must be higher than 1/COMMAND_DURATION ({} Hz) ".format(1/COMMAND_DURATION)
         self.__cmd_freq = cmd_freq
         self.log_file = None
         self.__should_reset = True
@@ -705,6 +704,7 @@ class SpotGym(SpotGymStateMachine, gym.Env):
 
     def close(self):
         super().close()
+        self.__should_reset = True
         self.log_file.close()
     
     def print_to_file(self, command: MobilityCommand, state: SpotState, currentTime):
@@ -780,19 +780,13 @@ class SpotGym(SpotGymStateMachine, gym.Env):
         self.__should_reset = False
         return new_state, read_time
     
-    def step(self, action: Any) -> Tuple[Any, float, bool, bool, dict]:
-        raise NotImplementedError("Step must be implemented in subclasses")
-    
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
-        raise NotImplementedError("Reset must be implemented in subclasses")
-
 class Spot2DEnv(SpotGym):
     def __init__(self, cmd_freq, monitor_freq=30):
         super().__init__(cmd_freq, monitor_freq)
-        self.observation_space = spaces.Box(low=[MINX, MINY, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED],
-                                            high=[MAXX, MAXY, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED])
-        self.action_space = spaces.Box(low=[-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED],
-                                        high=[MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED])
+        self.observation_space = spaces.Box(low=np.array([MINX, MINY, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
+                                            high=np.array([MAXX, MAXY, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
+        self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
+                                        high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
 
     def get_reward(self, action: np.ndarray, next_state: np.ndarray) -> float:
         return 0.0
@@ -801,8 +795,7 @@ class Spot2DEnv(SpotGym):
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
         rotation = R.from_quat([qx, qy, qz, qw]).as_euler("xyz")
         angle = rotation[2]
-        vx, vy, _ = state.velocity_of_body_in_vision.linear
-        _, _, w = state.velocity_of_body_in_vision.angular
+        vx, vy, _, _, _, w = state.velocity_of_body_in_vision
         return np.array([x, y, np.cos(angle), np.sin(angle), vx, vy, w])
 
     def step(self, action: np.ndarray) -> Optional[Tuple[Optional[np.ndarray], float, bool, bool, dict]]: 
