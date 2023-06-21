@@ -149,9 +149,15 @@ class BaseRobomasterEnv(gym.Env, ABC):
     
     def stop_robot(self):
         self.robot.chassis.drive_wheels(0,0,0,0)
+        return True
 
     def get_state_log(self):
         return self._state_log
+    
+    def close(self):
+        self.stop_robot()
+        self.subscriber.unsubscribe()
+        self.robot.close()
 
 class BaseEnvAccel(BaseRobomasterEnv):
     def __init__(self, robot: robomaster.robot.Robot, subscriber: ChassisSub, transforms=None) -> None:

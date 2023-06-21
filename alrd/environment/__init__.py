@@ -1,11 +1,12 @@
 from alrd.environment.env import BaseRobomasterEnv, init_robot, PositionControlEnv
 from alrd.environment.maze import MazeEnv, create_maze_env, MazeGoalEnv, MazeGoalPositionEnv, MazeGoalVelocityEnv, MazeGoalKinemEnv
 from alrd.environment.wrappers import GlobalFrameActionWrapper, CosSinObsWrapper, RemoveAngleActionWrapper, KeepObsWrapper, RepeatActionWrapper
+from alrd.environment.spot.spot import SpotGym, Spot2DEnv
 from alrd.subscriber import ChassisSub
 import numpy as np
 import time
 
-__all__ = ['BaseRobomasterEnv', 'RobomasterEnv', 'create_maze_env', 'MazeEnv', 'init_robot', 'MazeGoalEnv', 'PositionControlEnv']
+__all__ = ['BaseRobomasterEnv', 'RobomasterEnv', 'create_maze_env', 'MazeEnv', 'init_robot', 'MazeGoalEnv', 'PositionControlEnv', 'SpotGym']
 GOAL = (2.5, 1.8)
 def create_robomaster_env(
         poscontrol=False,
@@ -71,4 +72,15 @@ def create_robomaster_env(
         env = KeepObsWrapper(env, list(keep_idx))
     if repeat_action is not None:
         env = RepeatActionWrapper(env, repeat_action)
+    return env
+
+def create_spot_env(
+        hostname,
+        cmd_freq,
+        monitor_freq):
+    """
+    Creates and initializes spot environment.
+    """
+    env = Spot2DEnv(cmd_freq, monitor_freq)
+    env.initialize_robot(hostname)
     return env

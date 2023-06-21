@@ -1,8 +1,9 @@
 from alrd.environment.env import VelocityControlEnv
 from alrd.ui import KeyboardListener
-from alrd.agent.absagent import Agent
+from alrd.agent.absagent import Agent, AgentReset
 import numpy as np
 from alrd.utils import rotate_2d_vector
+from typing import Union
 
 class KeyboardAgent(Agent):
     def __init__(self, xy_speed, a_speed, noangle=False) -> None:
@@ -42,6 +43,19 @@ class KeyboardGPAgent(Agent):
         pressed = list(self.kb_agent.listener.which_pressed(['r']))
         if len(pressed) > 0:
             action = self.gp_agent.act(obs)
+        else:
+            action = self.kb_agent.act(obs)
+        return action
+
+class KeyboardResetAgent(AgentReset):
+    def __init__(self, kb_agent: Union[KeyboardAgent, KeyboardGPAgent]) -> None:
+        super().__init__()
+        self.kb_agent = kb_agent
+
+    def act(self, obs):
+        pressed = list(self.kb_agent.listener.which_pressed(['k']))
+        if len(pressed) > 0:
+            action = None
         else:
             action = self.kb_agent.act(obs)
         return action

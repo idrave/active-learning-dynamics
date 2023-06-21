@@ -1,6 +1,6 @@
 from alrd.agent.absagent import Agent
 from alrd.agent.gp import RandomGPAgent, PiecewiseRandomGPAgent, create_async_rbf_gp_agent
-from alrd.agent.keyboard import KeyboardAgent, KeyboardGPAgent
+from alrd.agent.keyboard import KeyboardAgent, KeyboardGPAgent, KeyboardResetAgent
 from alrd.agent.trajaxopt import TraJaxOptAgent
 from alrd.agent.adapter import AgentAdapter
 from mbse.utils.agent_checkpoint import SACCheckpoint
@@ -48,5 +48,15 @@ class AgentType(Enum):
             )
         else:
             raise NotImplementedError(f'Agent type {self} not implemented')
+
+class SpotAgentEnum(Enum):
+    KEYBOARD='keyboard'
+
+def create_spot_agent(agent_type: SpotAgentEnum):
+    if agent_type == SpotAgentEnum.KEYBOARD:
+        base_agent = KeyboardAgent(xy_speed=1, a_speed=1)
+        return KeyboardResetAgent(base_agent)
+    else:
+        raise NotImplementedError(f'Agent type {agent_type} not implemented')
 
 __all__ = ['Agent', 'RandomGPAgent', 'PiecewiseRandomGPAgent', 'KeyboardAgent']

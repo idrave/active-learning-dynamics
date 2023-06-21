@@ -8,9 +8,9 @@ from gym.wrappers.rescale_action import RescaleAction
 import numpy as np
 import time
 from alrd.utils import get_timestamp_str, convert_to_cos_sin
-from alrd.environment import BaseRobomasterEnv, create_robomaster_env
+from alrd.environment import BaseRobomasterEnv, create_robomaster_env, SpotGym, create_spot_env
 from alrd.environment.maze import MazeGoalVelocityEnv, MazeGoalPositionEnv
-from alrd.agent import Agent, RandomGPAgent, KeyboardAgent, AgentType
+from alrd.agent import Agent, RandomGPAgent, KeyboardAgent, AgentType, create_spot_agent, SpotAgentEnum
 from alrd.agent.repeat import RepeatAgent
 from alrd.environment.filter import KalmanFilter
 import json
@@ -24,14 +24,12 @@ import yaml
 import jax
 from alrd.environment.wrappers import CosSinObsWrapper, RemoveAngleActionWrapper, KeepObsWrapper, RepeatActionWrapper, GlobalFrameActionWrapper
 import tqdm
+from typing import Union
 
 logger = logging.getLogger(__file__)
 
 def close_and_save(env: BaseRobomasterEnv, buffer: ReplayBuffer, truncated_vec, info_list, output_dir):
-    env.stop_robot()
     env.close()
-    env.subscriber.unsubscribe()
-    env.robot.close()
     print('Closed environment')
     print('Collected', buffer.current_ptr, 'transitions')
     open(output_dir/'transitions.pickle', 'wb').write(pickle.dumps(buffer)) 
@@ -64,7 +62,7 @@ def init_filter(freq, use_acc):
                             init_cov = 0.01 * np.diag([1, 1]),
                             use_acc=False, pred_displ=True)
 
-def collect_data_buffer(agent: Agent, env: BaseRobomasterEnv, buffer, truncated_vec, info_list, max_steps, buffer_size, use_tqdm):
+def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], buffer, truncated_vec, info_list, max_steps, buffer_size, use_tqdm):
     num_points = max_steps
     obs_space =  env.observation_space.shape
     action_space =  env.action_space.shape
@@ -76,6 +74,9 @@ def collect_data_buffer(agent: Agent, env: BaseRobomasterEnv, buffer, truncated_
         if not started:
             count = 0
             obs, info = env.reset()
+            if obs is None:
+                logger.info("Reset returned None state. Stopping collection.")
+                break
             agent.reset()
             start = time.time()
             info_list.append(info)
@@ -86,16 +87,16 @@ def collect_data_buffer(agent: Agent, env: BaseRobomasterEnv, buffer, truncated_
             done_vec = np.zeros((num_points,))
             started = True
         action = agent.act(obs)
-        obs_vec[count] = obs
-        action_vec[count] = action
         next_obs, reward, terminated, truncated, info = env.step(action)
-        reward_vec[count] = reward
-        next_obs_vec[count] = next_obs
-        done_vec[count] = terminated
-        truncated_vec[step] = truncated
-        info_list.append(info)
-        count += 1
-        obs = next_obs
+        if next_obs is not None:
+            obs_vec[count] = obs
+            action_vec[count] = action
+            reward_vec[count] = reward
+            next_obs_vec[count] = next_obs
+            done_vec[count] = terminated
+            truncated_vec[step] = truncated
+            info_list.append(info)
+            count += 1
         if terminated or truncated:
             transitions = Transition(
                 obs=obs_vec[:count],
@@ -109,30 +110,34 @@ def collect_data_buffer(agent: Agent, env: BaseRobomasterEnv, buffer, truncated_
             started = False
             print('Terminated %s. Truncated %s' % (terminated, truncated))
             print('Episode length %d. Elapsed time %f. Average step time %f' % (count, time.time() - start, (time.time() - start)/count))
+        else:
+            obs = next_obs
 
+def add_common_args(main_parser: argparse.ArgumentParser):
+    main_parser.add_argument('--tag', type=str, default='')
+    main_parser.add_argument('--tqdm', action='store_true')
+    main_parser.add_argument('-n', '--n_steps', default=100000, type=int, help='Number of steps to record')
+    main_parser.add_argument('-e', '--episode_len', default=None, type=int, help='Maximum episode length')
+    main_parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency at which commands are supplied to the environment')
+    main_parser.add_argument('--noactnorm', action='store_true', help='Set action normalization to False in replay buffer')
 
-if __name__ == '__main__':
-    logger.info('Collecting data')
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--tag', type=str, default='')
-    parser.add_argument('--tqdm', action='store_true')
-    parser.add_argument('-n', '--n_steps', default=100000, type=int, help='Number of steps to record')
-    parser.add_argument('-e', '--episode_len', default=None, type=int, help='Maximum episode length')
-    parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency of the environment')
-    parser.add_argument('-a', '--agent', default=AgentType.KEYBOARD, type=AgentType, help='Agent to use', choices=[a for a in AgentType])
+def add_robomaster_parser(main_parser: argparse.ArgumentParser):
+    parser = main_parser.add_parser('robomaster')
     # Environment arguments
-    parser.add_argument('--poscontrol', action='store_true')
-    parser.add_argument('--raw_pos', action='store_true', help='Whether to use raw positon data instead of estimating from accelerometer')
-    parser.add_argument('--square', action='store_true', help='Square environment')
-    parser.add_argument('--cossin', action='store_true')
-    parser.add_argument('--noangle', action='store_true')
-    parser.add_argument('--novelocity', action='store_true')
-    parser.add_argument('--repeat_action', default=None, type=int, help='Number of times to repeat the action. Reduces the required control frequency')
-    parser.add_argument('--global_frame', action='store_true', help='Use global frame for environment and agent')
-    parser.add_argument('--margin', type=float, default=0.3)
-    parser.add_argument('--slide', action='store_true')
+    env_parser = parser.add_argument_group('Robomaster environment arguments')
+    env_parser.add_argument('--poscontrol', action='store_true')
+    env_parser.add_argument('--raw_pos', action='store_true', help='Whether to use raw positon data instead of estimating from accelerometer')
+    env_parser.add_argument('--square', action='store_true', help='Square environment')
+    env_parser.add_argument('--cossin', action='store_true')
+    env_parser.add_argument('--noangle', action='store_true')
+    env_parser.add_argument('--novelocity', action='store_true')
+    env_parser.add_argument('--repeat_action', default=None, type=int, help='Number of times to repeat the action. Reduces the required control frequency')
+    env_parser.add_argument('--global_frame', action='store_true', help='Use global frame for environment and agent')
+    env_parser.add_argument('--margin', type=float, default=0.3)
+    env_parser.add_argument('--slide', action='store_true')
     # Agent arguments
     agent_parser = parser.add_argument_group('Agent arguments')
+    agent_parser.add_argument('-a', '--agent', default=AgentType.KEYBOARD, type=AgentType, help='Agent to use', choices=[a for a in AgentType])
     agent_parser.add_argument('--seed', default=0, type=int, help='Seed for random action sampling')
     agent_parser.add_argument('--xy_speed', default=0.5, type=float, help='Speed of the agent in the xy plane')
     agent_parser.add_argument('--a_speed', default=120, type=float, help='Angular speed of the agent')
@@ -142,54 +147,79 @@ if __name__ == '__main__':
     agent_parser.add_argument('--agent_checkpoint', default=None, type=str, help='Path to SAC agent checkpoint')
     agent_parser.add_argument('--model_checkpoint', default=None, type=str, help='Path to model checkpoint')
     agent_parser.add_argument('--horizon', default=60, type=int, help='Horizon of the MPC agent')
-    args = parser.parse_args()
+
+def add_spot_parser(main_parser: argparse.ArgumentParser):
+    parser = main_parser.add_argument('spot')
+    parser.set_defaults(robot='spot')
+    parser.add_argument('hostname', type=str, required=True, help='Hostname of the spot robot')
+    parser.add_argument('--monitor', type=int, default=30, help='Frequency at which the environment checks if the robot is within boundaries')
+    parser.add_argument('-a', '--agent', default=SpotAgentEnum.KEYBOARD.value, type=str, help='Agent to use', choices=[a.value for a in SpotAgentEnum])
+
+def collect_data(args):
     output_dir = Path('output')/'data'/('%s-%s'%(args.tag,get_timestamp_str()))
     output_dir.mkdir()
     yaml.dump(vars(args), open(output_dir/'args.yaml', 'w'))
-    env = create_robomaster_env(
-        args.poscontrol,
-        not args.raw_pos,
-        args.margin,
-        args.freq,
-        args.slide,
-        args.global_frame,
-        args.cossin,
-        args.noangle,
-        args.novelocity,
-        None, # args.repeat_action,
-        args.square,
-        args.xy_speed,
-        args.a_speed
-    )
+    if args.robot == 'robomaster':
+        env = create_robomaster_env(
+            poscontrol=args.poscontrol,
+            estimate_from_acc=not args.raw_pos,
+            margin=args.margin,
+            freq=args.freq,
+            slide_wall=args.slide,
+            global_frame=args.global_frame,
+            cossin=args.cossin,
+            noangle=args.noangle,
+            novelocity=args.novelocity,
+            repeat_action=None, # args.repeat_action,
+            square=args.square,
+            xy_speed=args.xy_speed,
+            a_speed=args.a_speed
+        )
+        args.agent_rng = jax.random.PRNGKey(args.seed)
+        args.reward_model = env.unwrapped.reward
+        agent = args.agent(args)
+        if args.repeat_action is not None:
+            agent = RepeatAgent(agent, args.repeat_action)
+    elif args.robot == 'spot':
+        agent_type=SpotAgentEnum(args.agent)
+        env = create_spot_env(
+            hostname=args.hostname,
+            cmd_freq=args.freq,
+            monitor_freq=args.monitor
+        )
+        agent = create_spot_agent(
+            agent_type=agent_type
+        )
+    else:
+        raise NotImplementedError(f'Robot {args.robot} not implemented')
     print('env', type(env), 'obs', env.observation_space.shape)
     env = RescaleAction(env, min_action=-1, max_action=1)
     max_episode_steps = args.episode_len
     if max_episode_steps is not None:
         print(max_episode_steps)
         env = TimeLimit(env, max_episode_steps=max_episode_steps)
-    args.agent_rng = jax.random.PRNGKey(args.seed)
-    args.reward_model = env.unwrapped.reward
-    agent = args.agent(args)
-    if args.repeat_action is not None:
-        agent = RepeatAgent(agent, args.repeat_action)
-    sequences = []
-    sub_logs = []
     buffer = ReplayBuffer(
         obs_shape=env.observation_space.shape,
         action_shape=env.action_space.shape,
         normalize=True,
-        action_normalize=True,
+        action_normalize=not args.noactnorm,
         learn_deltas=True
     )
     truncated_vec = np.zeros((args.n_steps,))
     info_list = []
-    def finish():
-        close_and_save(env, buffer, truncated_vec, info_list, output_dir)        
-    handler = HandleSignal(finish)
     try:
         collect_data_buffer(
             agent, env, buffer, truncated_vec, info_list, max_episode_steps,  args.n_steps, use_tqdm=args.tqdm)
     except Exception as e:
         traceback.print_exc()
     finally:
-        finish()
+        close_and_save(env, buffer, truncated_vec, info_list, output_dir)        
+
+if __name__ == '__main__':
+    logger.info('Collecting data')
+    parser = argparse.ArgumentParser()
+    add_common_args(parser)
+    add_robomaster_parser(parser)
+    add_spot_parser(parser)
+    args = parser.parse_args()
+    collect_data(args)
