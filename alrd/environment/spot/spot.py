@@ -1,18 +1,15 @@
-from __future__ import print_function
+from __future__ import print_function, annotations
 
-import argparse
-import math
-import textwrap
 import traceback
 from dataclasses import dataclass, field
 import time
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any 
 from enum import Enum
 from pathlib import Path
 
 from alrd.environment.spot.command import Command, OrientationCommand, CommandEnum, MobilityCommand
 from alrd.environment.spot.robot_state import SpotState
-from alrd.utils import get_timestamp_str
+from alrd.utils import get_timestamp_str, rotate_2d_vector
 
 import bosdyn.api.basic_command_pb2 as basic_command_pb2
 import bosdyn.client
@@ -33,12 +30,11 @@ from gym import spaces
 import logging
 import threading
 import numpy as np
-import signal
 import queue
 
 ##### Boundaries of the environment #####
-MINX = -1.0
-MAXX = 1.0
+MINX = -2.0
+MAXX = 2.0
 MINY = -1.0
 MAXY = 1.0
 ##### Spot parameters #####
@@ -503,10 +499,11 @@ class SpotGymStateMachine(SpotGymBase):
         return result if result is not None else (False, None)
 
     def is_in_bounds(self, state: SpotState) -> bool:
-        x0, y0, _ = self._origin
+        x0, y0, a0 = self._origin
         x, y, _, _, _, _, _ = state.pose_of_body_in_vision
         x -= x0
         y -= y0
+        x, y = rotate_2d_vector(np.array([x, y]), -a0, degrees=False)
         return x > MINX and x < MAXX and y > MINY and y < MAXY
     
     def __bounds_srv(self): 
@@ -679,7 +676,8 @@ class SpotGymStateMachine(SpotGymBase):
         self.__state = State.SHUTDOWN
 
 class SpotGym(SpotGymStateMachine, gym.Env):
-    def __init__(self, cmd_freq, monitor_freq=30., truncate_on_timeout=True):
+    def __init__(self, cmd_freq: float, monitor_freq: float = 30, truncate_on_timeout: bool = True,
+                 log_dir: str | Path | None = None):
         """
         monitor_freq: Environment's maximum state monitoring frequency for checking position boundaries.
         cmd_freq: Environment's maximum action frequency. Commands will take at least 1/cmd_freq seconds to execute.
@@ -689,18 +687,22 @@ class SpotGym(SpotGymStateMachine, gym.Env):
         assert 1/monitor_freq <= MAX_TIMEOUT + 1e-5, "Monitor frequency must be higher than 1/{} Hz to ensure safe navigation".format(MAX_TIMEOUT)
         assert 1/cmd_freq <= COMMAND_DURATION + 1e-5, "Command frequency must be higher than 1/COMMAND_DURATION ({} Hz) ".format(1/COMMAND_DURATION)
         self.__cmd_freq = cmd_freq
+        self.log_dir = Path(log_dir) if log_dir is not None else Path("output/spot")
         self.log_file = None
         self.__should_reset = True
         self.truncate_on_timeout = truncate_on_timeout
+        self.logger.addHandler(logging.FileHandler(self.log_dir / "spot_gym.log"))
     
     def initialize_robot(self, hostname):
         super().initialize_robot(hostname)
     
     def start(self):
+        if not self.log_dir.is_dir():
+            self.log_dir.mkdir(exist_ok=False, parents=True)
         super().start()
-        filepath = Path("output/spot") / (get_timestamp_str() + ".txt")
+        filepath = self.log_dir / ('session-'+get_timestamp_str() + ".txt")
         self.log_file = open(filepath, "w")
-        self.logger.info(f"Printing to {self.log_file}")
+        self.logger.info(f"Printing to {filepath}")
 
     def close(self):
         super().close()
@@ -781,8 +783,8 @@ class SpotGym(SpotGymStateMachine, gym.Env):
         return new_state, read_time
     
 class Spot2DEnv(SpotGym):
-    def __init__(self, cmd_freq, monitor_freq=30):
-        super().__init__(cmd_freq, monitor_freq)
+    def __init__(self, cmd_freq: float, monitor_freq: float = 30, log_dir: str | Path | None = None):
+        super().__init__(cmd_freq, monitor_freq, log_dir=log_dir)
         self.observation_space = spaces.Box(low=np.array([MINX, MINY, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                             high=np.array([MAXX, MAXY, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),

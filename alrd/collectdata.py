@@ -18,7 +18,7 @@ import pickle
 from pathlib import Path
 import logging
 import signal
-from mbse.utils.replay_buffer import ReplayBuffer, Transition
+from mbse.utils.replay_buffer import ReplayBuffer, Transition, EpisodicReplayBuffer
 import argparse
 import yaml
 import jax
@@ -35,7 +35,7 @@ def close_and_save(env: BaseRobomasterEnv, buffer: ReplayBuffer, truncated_vec, 
     open(output_dir/'transitions.pickle', 'wb').write(pickle.dumps(buffer)) 
     open(output_dir/'truncated.pickle', 'wb').write(pickle.dumps(truncated_vec)) 
     open(output_dir/'info.json', 'w').write(json.dumps(info_list))
-    open(output_dir/'state_log.json', 'w').write(json.dumps(env.get_state_log()))
+    #open(output_dir/'state_log.json', 'w').write(json.dumps(env.get_state_log()))
     print(f'Output {output_dir}')
 
 class HandleSignal:
@@ -76,6 +76,7 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
             obs, info = env.reset()
             if obs is None:
                 logger.info("Reset returned None state. Stopping collection.")
+                env.stop_robot()
                 break
             agent.reset()
             start = time.time()
@@ -97,7 +98,7 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
             truncated_vec[step] = truncated
             info_list.append(info)
             count += 1
-        if terminated or truncated:
+        if terminated or truncated or step == buffer_size - 1:
             transitions = Transition(
                 obs=obs_vec[:count],
                 action=action_vec[:count],
@@ -112,6 +113,7 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
             print('Episode length %d. Elapsed time %f. Average step time %f' % (count, time.time() - start, (time.time() - start)/count))
         else:
             obs = next_obs
+    env.reset()
 
 def add_common_args(main_parser: argparse.ArgumentParser):
     main_parser.add_argument('--tag', type=str, default='')
@@ -121,9 +123,9 @@ def add_common_args(main_parser: argparse.ArgumentParser):
     main_parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency at which commands are supplied to the environment')
     main_parser.add_argument('--noactnorm', action='store_true', help='Set action normalization to False in replay buffer')
 
-def add_robomaster_parser(main_parser: argparse.ArgumentParser):
-    parser = main_parser.add_parser('robomaster')
+def add_robomaster_parser(parser: argparse.ArgumentParser):
     # Environment arguments
+    add_common_args(parser)
     env_parser = parser.add_argument_group('Robomaster environment arguments')
     env_parser.add_argument('--poscontrol', action='store_true')
     env_parser.add_argument('--raw_pos', action='store_true', help='Whether to use raw positon data instead of estimating from accelerometer')
@@ -148,10 +150,9 @@ def add_robomaster_parser(main_parser: argparse.ArgumentParser):
     agent_parser.add_argument('--model_checkpoint', default=None, type=str, help='Path to model checkpoint')
     agent_parser.add_argument('--horizon', default=60, type=int, help='Horizon of the MPC agent')
 
-def add_spot_parser(main_parser: argparse.ArgumentParser):
-    parser = main_parser.add_argument('spot')
-    parser.set_defaults(robot='spot')
-    parser.add_argument('hostname', type=str, required=True, help='Hostname of the spot robot')
+def add_spot_parser(parser: argparse.ArgumentParser):
+    add_common_args(parser)
+    parser.add_argument('hostname', type=str, help='Hostname of the spot robot')
     parser.add_argument('--monitor', type=int, default=30, help='Frequency at which the environment checks if the robot is within boundaries')
     parser.add_argument('-a', '--agent', default=SpotAgentEnum.KEYBOARD.value, type=str, help='Agent to use', choices=[a.value for a in SpotAgentEnum])
 
@@ -180,16 +181,32 @@ def collect_data(args):
         agent = args.agent(args)
         if args.repeat_action is not None:
             agent = RepeatAgent(agent, args.repeat_action)
+        buffer = ReplayBuffer(
+            obs_shape=env.observation_space.shape,
+            action_shape=env.action_space.shape,
+            normalize=True,
+            action_normalize=not args.noactnorm,
+            learn_deltas=True
+        )
     elif args.robot == 'spot':
         agent_type=SpotAgentEnum(args.agent)
         env = create_spot_env(
             hostname=args.hostname,
             cmd_freq=args.freq,
-            monitor_freq=args.monitor
+            monitor_freq=args.monitor,
+            log_dir=output_dir
         )
         agent = create_spot_agent(
             agent_type=agent_type
         )
+        buffer = EpisodicReplayBuffer(
+            obs_shape=env.observation_space.shape,
+            action_shape=env.action_space.shape,
+            normalize=True,
+            action_normalize=not args.noactnorm,
+            learn_deltas=True
+        )
+        env.start()
     else:
         raise NotImplementedError(f'Robot {args.robot} not implemented')
     print('env', type(env), 'obs', env.observation_space.shape)
@@ -198,13 +215,6 @@ def collect_data(args):
     if max_episode_steps is not None:
         print(max_episode_steps)
         env = TimeLimit(env, max_episode_steps=max_episode_steps)
-    buffer = ReplayBuffer(
-        obs_shape=env.observation_space.shape,
-        action_shape=env.action_space.shape,
-        normalize=True,
-        action_normalize=not args.noactnorm,
-        learn_deltas=True
-    )
     truncated_vec = np.zeros((args.n_steps,))
     info_list = []
     try:
@@ -218,8 +228,8 @@ def collect_data(args):
 if __name__ == '__main__':
     logger.info('Collecting data')
     parser = argparse.ArgumentParser()
-    add_common_args(parser)
-    add_robomaster_parser(parser)
-    add_spot_parser(parser)
+    subparsers = parser.add_subparsers(title='Robot', dest='robot', help='Robot on which to collect data', required=True)
+    add_robomaster_parser(subparsers.add_parser('robomaster'))
+    add_spot_parser(subparsers.add_parser('spot'))
     args = parser.parse_args()
     collect_data(args)

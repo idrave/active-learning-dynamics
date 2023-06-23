@@ -1,8 +1,10 @@
+from __future__ import annotations
 from alrd.environment.env import BaseRobomasterEnv, init_robot, PositionControlEnv
 from alrd.environment.maze import MazeEnv, create_maze_env, MazeGoalEnv, MazeGoalPositionEnv, MazeGoalVelocityEnv, MazeGoalKinemEnv
 from alrd.environment.wrappers import GlobalFrameActionWrapper, CosSinObsWrapper, RemoveAngleActionWrapper, KeepObsWrapper, RepeatActionWrapper
 from alrd.environment.spot.spot import SpotGym, Spot2DEnv
 from alrd.subscriber import ChassisSub
+from pathlib import Path
 import numpy as np
 import time
 
@@ -75,12 +77,13 @@ def create_robomaster_env(
     return env
 
 def create_spot_env(
-        hostname,
-        cmd_freq,
-        monitor_freq):
+        hostname: str,
+        cmd_freq: float,
+        monitor_freq: float = 30,
+        log_dir: str | Path | None = None):
     """
     Creates and initializes spot environment.
     """
-    env = Spot2DEnv(cmd_freq, monitor_freq)
+    env = Spot2DEnv(cmd_freq, monitor_freq, log_dir=log_dir)
     env.initialize_robot(hostname)
     return env

@@ -1,6 +1,7 @@
+from __future__ import annotations
 from datetime import datetime
 from scipy.spatial.transform import Rotation
-from mbse.utils.replay_buffer import ReplayBuffer, Transition, get_past_values
+from mbse.utils.replay_buffer import ReplayBuffer, Transition, get_past_values, BaseBuffer, EpisodicReplayBuffer
 import time
 import numpy as np
 import jax
@@ -21,14 +22,14 @@ def get_transition_from_buffer(buffer: ReplayBuffer):
     )
     return t
 
-def rotate_2d_vector(vector, angle):
+def rotate_2d_vector(vector, angle, degrees=True):
     """
-    Rotates a 2d vector by angle degrees
-    :param vector: 2d vector
-    :param angle: angle in degrees
-    :return: rotated vector
+    Parameters:
+        vector: (x,y)
+        angle
+        degrees: whether to interpret the angle in degrees, otherwise it is used in radians
     """
-    return Rotation.from_euler('z', angle, degrees=True).as_matrix()[:2, :2] @ vector
+    return Rotation.from_euler('z', angle, degrees=degrees).as_matrix()[:2, :2] @ vector
 
 def sleep_ms(miliseconds):
     start = time.time()
@@ -344,26 +345,6 @@ def uniform_savgol(y, window_size, degree):
         new_y[:, i] = non_uniform_savgol(np.arange(len(y)), y[:, i], window_size, degree)
     return new_y
 
-def slice_buffer(buffer: ReplayBuffer, start: int, end: int):
-    new_buffer = ReplayBuffer(
-        obs_shape=buffer.obs_shape,
-        action_shape=buffer.action_shape,
-        max_size=buffer.max_size,
-        normalize=buffer.normalize,
-        action_normalize=buffer.action_normalize,
-        learn_deltas=buffer.learn_deltas
-    )
-    t = get_transition_from_buffer(buffer)
-    new_t = Transition(
-        t.obs[start:end],
-        t.action[start:end],
-        t.next_obs[start:end],
-        t.reward[start:end],
-        t.done[start:end]
-    )
-    new_buffer.add(new_t)
-    return new_buffer
-
 def get_dims(buffer: ReplayBuffer, idx, act_idx):
     new_buffer = ReplayBuffer(
         obs_shape=(*buffer.obs_shape[:-1], len(idx)),
@@ -436,7 +417,6 @@ def load_dataset(
         usepast: Optional[int] = None,
         usepastact: bool = False,
         control_freq: Optional[int] = None,
-        maxdata: Optional[int] = None,
         episodelen: Optional[int] = None,
         downsample: Optional[int] = None,
         downsample_method: str = 'median',
@@ -444,11 +424,6 @@ def load_dataset(
         filteract: bool = False,
         filter_kwargs: Optional[dict] = None):
     buffer = pickle.load(open(buffer_path, 'rb'))
-    if maxdata is not None:
-        if maxdata > buffer.size:
-            print(f"warning: maxdata ({maxdata}) is larger than the size of the train buffer, reducing to ({buffer.size})")
-            maxdata = buffer.size
-        buffer = slice_buffer(buffer, 0, maxdata)
     if downsample is not None:
         if downsample_method == 'median':
             buffer = strided_median_filter_buffer(buffer, downsample, episodelen)
@@ -494,5 +469,18 @@ def load_dataset(
         assert episodelen is not None
         buffer = use_past_state(buffer, usepast, usepastact, episodelen)
     else:
-        buffer.use_history = None # TODO should not be needed for buffers with newer version
+        buffer._use_history = None # TODO should not be needed for buffers with newer version
+    return buffer
+
+def load_episodic_dataset(
+        buffer_path: str,
+        usepast: Optional[int] = None,
+        usepastact: bool = False,
+        hide_state_ind: Sequence[int] | None = None
+        ):
+    buffer = pickle.load(open(buffer_path, 'rb'))
+    assert isinstance(buffer, EpisodicReplayBuffer)
+    if usepast != buffer.use_history or usepastact != buffer.use_action_history:            
+        buffer.set_use_history(usepast, usepastact)
+    buffer.hide_indices(hide_state_ind)
     return buffer
