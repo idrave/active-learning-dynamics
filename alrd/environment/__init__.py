@@ -116,7 +116,7 @@ def load_episodic_dataset(
         buffer_path: path to input buffer
         usepast: number of past observations to include in sampled observation
         usepastact: whether to include past actions in sampled observation
-        goal: goal position (x, y, theta)
+        goal: goal position (x, y)
     """
     data = pickle.load(open(buffer_path, 'rb'))
     obs_shape = (7,)
@@ -140,8 +140,8 @@ def load_episodic_dataset(
     for i in range(data.num_episodes):
         tran = data.get_episode(i)
         if goal is not None:
-            tran.obs[:] = change_spot2d_obs_frame(tran.obs, goal[:2], goal[2])
-            tran.next_obs[:] = change_spot2d_obs_frame(tran.next_obs, goal[:2], goal[2])
+            tran.obs[:] = change_spot2d_obs_frame(tran.obs, goal, 0)
+            tran.next_obs[:] = change_spot2d_obs_frame(tran.next_obs, goal, 0)
             tran.reward[:,0] = reward_fn(tran.next_obs, tran.action)[:]
         buffer.add(tran)
 

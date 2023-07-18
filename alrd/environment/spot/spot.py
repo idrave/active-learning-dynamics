@@ -15,7 +15,8 @@ import bosdyn.client.util
 import numpy as np
 from alrd.environment.spot.command import Command 
 from alrd.environment.spot.robot_state import SpotState
-from alrd.utils import rotate_2d_vector
+from alrd.environment.spot.utils import get_hitbox
+from alrd.utils import rotate_2d_vector, change_frame_2d
 from bosdyn.api import estop_pb2
 from bosdyn.client import frame_helpers
 from bosdyn.client.estop import EstopClient
@@ -491,12 +492,13 @@ class SpotGymStateMachine(SpotGymBase):
         return result if result is not None else (False, None)
 
     def is_in_bounds(self, state: SpotState) -> bool:
-        x0, y0, a0 = self._startpos
-        x, y, _, _, _, _, _ = state.pose_of_body_in_vision
-        x -= x0
-        y -= y0
-        x, y = rotate_2d_vector(np.array([x, y]), -a0, degrees=False)
-        return x > MINX and x < MAXX and y > MINY and y < MAXY
+        x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
+        angle = R.from_quat([qx, qy, qz, qw]).as_euler("xyz", degrees=False)[2]
+        box = get_hitbox(x, y, angle)
+        box = change_frame_2d(box, self._startpos[:2], self._startpos[2], degrees=False)
+        min_x, min_y = np.min(box, axis=0)
+        max_x, max_y = np.max(box, axis=0)
+        return min_x > MINX + MARGIN and max_x < MAXX - MARGIN and min_y > MINY + MARGIN and max_y < MAXY - MARGIN
     
     def __bounds_srv(self): 
         try:

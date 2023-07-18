@@ -14,7 +14,7 @@ from alrd.environment.spot.robot_state import SpotState
 from alrd.environment.spot.spot import (MAX_ANGULAR_SPEED, MAX_SPEED, MAXX,
                                         MAXY, MINX, MINY)
 from alrd.environment.spot.spotgym import SpotGym
-from alrd.environment.spot.utils import DIST_TO_FRONT
+from alrd.environment.spot.utils import get_front_coord
 from alrd.utils import change_frame_2d, rotate_2d_vector
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from gym import spaces
@@ -32,8 +32,7 @@ class Spot2DReward(RewardModel):
     @jax.partial(jax.jit, static_argnums=0) # assumes object is static
     def predict(self, obs, action, next_obs=None, rng=None):
         x, y, cos, sin = obs[:4]
-        front_x = x + cos * DIST_TO_FRONT
-        front_y = y + sin * DIST_TO_FRONT
+        front_x, front_y = get_front_coord(x, y, cos, sin)
         reward = self._tolerance(jnp.linalg.norm(jnp.array([front_x, front_y]) - self._goal_pos))
         return reward
 
@@ -46,22 +45,22 @@ class Spot2DEnv(SpotGym):
                                             high=np.array([MAXX, MAXY, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                         high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
-        self.goal_pos = None
+        self.goal_pos = None # goal position in vision frame
+        self._vision_origin = change_frame_2d(np.array([0, 0]), self._startpos[:2], self._startpos[2], degrees=False) # vision frame origin relative to environment frame
         self.reward = Spot2DReward()
 
     def get_obs_from_state(self, state: SpotState) -> np.ndarray:
         """
-        Parameters:
-            state
+        Returns
+            [x, y, cos, sin, vx, vy, w] with the origin at the goal position and axis aligned to environment frame
         """
         origin = self.goal_pos
+        _, _, theta0 = self._startpos
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
-        rotation = R.from_quat([qx, qy, qz, qw]).as_euler("xyz")
-        angle = rotation[2]
-        vx, vy, _, _, _, w = state.velocity_of_body_in_vision
-        _, _, theta0 = origin
-        x, y = change_frame_2d(np.array([x, y]), origin[:2], theta0, degrees=False)
+        angle = R.from_quat([qx, qy, qz, qw]).as_euler("xyz", degrees=False)[2]
+        x, y = change_frame_2d(np.array([x, y]), origin, theta0, degrees=False)
         angle -= theta0
+        vx, vy, _, _, _, w = state.velocity_of_body_in_vision
         vx, vy = rotate_2d_vector(np.array([vx, vy]), -theta0)
         return np.array([x, y, np.cos(angle), np.sin(angle), vx, vy, w])
 
@@ -77,13 +76,13 @@ class Spot2DEnv(SpotGym):
         return self.reward.predict(next_obs, action)
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
-        goal = options.get("goal", None)
+        goal = options.get("goal", None) # optional goal expressed relative to environment frame
         if goal is None:
-            self.goal_pos = self._startpos
+            self.goal_pos = self._startpos[:2]
         else:
-            origin = change_frame_2d(np.array([0, 0]), self._startpos[:2], self._startpos[2], degrees=False)
-            goal_pos = change_frame_2d(np.array(goal[:2]), origin, -self._startpos[2], degrees=False)
-            self.goal_pos = np.array([goal_pos[0], goal_pos[1], self._startpos[2] + goal[2]])
+            origin = self._vision_origin
+            goal_pos = change_frame_2d(np.array(goal[:2]), origin, -self._startpos[2], degrees=False) # convert to vision frame
+            self.goal_pos = np.array([goal_pos[0], goal_pos[1]])
         return super().reset(seed=seed, options=options)
 
 

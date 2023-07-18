@@ -51,7 +51,7 @@ def rotate_2d_vector_cossin(vector, cos, sin):
 def change_frame_2d(vector, origin, angle, degrees=True):
     """
     Parameters:
-        vector: (x,y)
+        vector: [..., 2] array with vectors (x,y)
         origin: (x0,y0) of the new frame
         angle: angle of the new frame with respect to the old one 
     """
