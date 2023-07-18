@@ -1,5 +1,7 @@
 ### Logging
 import logging
+
+from alrd.environment.spot.spotgym import SpotGym
 logging.basicConfig(level=logging.INFO)
 ###
 import traceback
@@ -8,7 +10,7 @@ from gym.wrappers.rescale_action import RescaleAction
 import numpy as np
 import time
 from alrd.utils import get_timestamp_str, convert_to_cos_sin
-from alrd.environment import BaseRobomasterEnv, create_robomaster_env, SpotGym, create_spot_env
+from alrd.environment import BaseRobomasterEnv, create_robomaster_env, create_spot_env
 from alrd.environment.maze import MazeGoalVelocityEnv, MazeGoalPositionEnv
 from alrd.agent import Agent, RandomGPAgent, KeyboardAgent, AgentType, create_spot_agent, SpotAgentEnum
 from alrd.agent.repeat import RepeatAgent

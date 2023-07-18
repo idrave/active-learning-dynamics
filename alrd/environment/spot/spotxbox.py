@@ -5,11 +5,13 @@ import math
 import textwrap
 import time
 import logging
+import traceback
 from enum import Enum
+from alrd.environment.spot.mobility_command import MobilityCommand
 
 from alrd.xbox.xbox_joystick_factory import XboxJoystickFactory
 from alrd.environment.spot.spot import SpotGymBase
-from alrd.environment.spot.command import MobilityCommand, OrientationCommand
+from alrd.environment.spot.orientation_command import OrientationCommand
 
 import bosdyn.api.basic_command_pb2 as basic_command_pb2
 import bosdyn.client
@@ -95,6 +97,8 @@ class SpotXbox(SpotGymBase):
         self.stand_yaw_change = False
         self.last_cmd = None
         self.robot_state = None
+
+        self.log_file = None
 
     def initialize_robot(self, hostname):
         super().initialize_robot(hostname)
@@ -592,7 +596,8 @@ class SpotXbox(SpotGymBase):
 
     def _shutdown(self):
         super()._shutdown()
-        self.log_file.close()
+        if self.log_file is not None:
+            self.log_file.close()
 
 def main(argv):
     """Parses command line args.
@@ -628,7 +633,7 @@ def main(argv):
         print("Initialized robot")
         controller.control_robot(max_frequency)
     except Exception as e:
-        print(e)
+        traceback.print_exc()
         controller._shutdown()
 
 if __name__ == "__main__":

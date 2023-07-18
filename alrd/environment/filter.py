@@ -1,6 +1,6 @@
 import pykalman
 import numpy as np
-from alrd.environment.env import AbsEnv
+from alrd.environment.env import BaseRobomasterEnv
 from alrd.utils import rotate_2d_vector
 import copy
 import logging
@@ -154,11 +154,11 @@ class KalmanFilterObs:
         self.order_a = max(2, filter.filter_a.n_dim_obs)
 
     def __call__(self, obs):
-        position = obs[AbsEnv.POSITION]
-        vel = obs[AbsEnv.VELOCITY]
-        angle = obs[AbsEnv.ANGLE]
-        angular_vel = obs[AbsEnv.ANGULAR_V]
-        acc = obs[AbsEnv.ACCELERATION]
+        position = obs[BaseRobomasterEnv.POSITION]
+        vel = obs[BaseRobomasterEnv.VELOCITY]
+        angle = obs[BaseRobomasterEnv.ANGLE]
+        angular_vel = obs[BaseRobomasterEnv.ANGULAR_V]
+        acc = obs[BaseRobomasterEnv.ACCELERATION]
         newobs = copy.deepcopy(obs)
         obs_x = np.array([position[0], vel[0], acc[0]])
         obs_y = np.array([position[1], vel[1], acc[1]])
@@ -168,9 +168,9 @@ class KalmanFilterObs:
         pred_a = np.array(obs_a)
         pred_x[:self.order_x], pred_y[:self.order_y], pred_a[:self.order_a] = \
             self.filter(obs_x[:self.order_x], obs_y[:self.order_y], obs_a[:self.order_a])
-        newobs[AbsEnv.POSITION] = np.array([pred_x[0], pred_y[0]])
-        newobs[AbsEnv.VELOCITY] = np.array([pred_x[1], pred_y[1]])
-        newobs[AbsEnv.ACCELERATION] = np.array([pred_x[2], pred_y[2]])
-        newobs[AbsEnv.ANGLE] = pred_a[0]
-        newobs[AbsEnv.ANGULAR_V] = pred_a[1]
+        newobs[BaseRobomasterEnv.POSITION] = np.array([pred_x[0], pred_y[0]])
+        newobs[BaseRobomasterEnv.VELOCITY] = np.array([pred_x[1], pred_y[1]])
+        newobs[BaseRobomasterEnv.ACCELERATION] = np.array([pred_x[2], pred_y[2]])
+        newobs[BaseRobomasterEnv.ANGLE] = pred_a[0]
+        newobs[BaseRobomasterEnv.ANGULAR_V] = pred_a[1]
         return newobs 

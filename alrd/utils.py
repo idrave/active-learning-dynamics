@@ -8,6 +8,8 @@ import jax
 import jax.numpy as jnp
 from typing import Optional, Sequence, Callable
 import pickle
+import json
+from pathlib import Path
 
 def get_timestamp_str():
     return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -25,11 +27,35 @@ def get_transition_from_buffer(buffer: ReplayBuffer):
 def rotate_2d_vector(vector, angle, degrees=True):
     """
     Parameters:
+        vector: [..., 2] array with vectors (x,y)
+        angle: scalar
+        degrees: whether to interpret the angle in degrees, otherwise it is used in radians
+    """
+    result = Rotation.from_euler('z', angle, degrees=degrees).as_matrix()[:2, :2] @ vector[...,None]
+    return result[...,0]
+
+def rotate_2d_vector_jax(vector, angle, degrees=True):
+    """
+    Parameters:
         vector: (x,y)
         angle
         degrees: whether to interpret the angle in degrees, otherwise it is used in radians
     """
-    return Rotation.from_euler('z', angle, degrees=degrees).as_matrix()[:2, :2] @ vector
+    if degrees:
+        angle = angle * np.pi / 180
+    return jnp.array([vector[0] * jnp.cos(angle) - vector[1] * jnp.sin(angle), vector[0] * jnp.sin(angle) + vector[1] * jnp.cos(angle)])
+
+def rotate_2d_vector_cossin(vector, cos, sin):
+    return jnp.array([vector[0] * cos - vector[1] * sin, vector[0] * sin + vector[1] * cos])
+
+def change_frame_2d(vector, origin, angle, degrees=True):
+    """
+    Parameters:
+        vector: (x,y)
+        origin: (x0,y0) of the new frame
+        angle: angle of the new frame with respect to the old one 
+    """
+    return rotate_2d_vector(vector - origin, -angle, degrees=degrees)
 
 def sleep_ms(miliseconds):
     start = time.time()
@@ -484,3 +510,9 @@ def load_episodic_dataset(
         buffer.set_use_history(usepast, usepastact)
     buffer.hide_indices(hide_state_ind)
     return buffer
+
+class JsonPathEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Path):
+            return str(obj)
+        return json.JSONEncoder.default(self, obj)

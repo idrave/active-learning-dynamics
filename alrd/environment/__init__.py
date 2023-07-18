@@ -1,12 +1,29 @@
 from __future__ import annotations
-from alrd.environment.env import BaseRobomasterEnv, init_robot, PositionControlEnv
-from alrd.environment.maze import MazeEnv, create_maze_env, MazeGoalEnv, MazeGoalPositionEnv, MazeGoalVelocityEnv, MazeGoalKinemEnv
-from alrd.environment.wrappers import GlobalFrameActionWrapper, CosSinObsWrapper, RemoveAngleActionWrapper, KeepObsWrapper, RepeatActionWrapper
-from alrd.environment.spot.spot import SpotGym, Spot2DEnv
-from alrd.subscriber import ChassisSub
-from pathlib import Path
-import numpy as np
+
+import pickle
 import time
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+from alrd.environment.env import (BaseRobomasterEnv, PositionControlEnv,
+                                  init_robot)
+from alrd.environment.maze import (MazeEnv, MazeGoalEnv, MazeGoalKinemEnv,
+                                   MazeGoalPositionEnv, MazeGoalVelocityEnv,
+                                   create_maze_env)
+from alrd.environment.spot.record import Episode, Session
+from alrd.environment.spot.robot_state import KinematicState
+from alrd.environment.spot.spot2d import (Spot2DEnv, Spot2DReward,
+                                          change_spot2d_obs_frame)
+from alrd.environment.spot.spotgym import SpotGym
+from alrd.environment.wrappers import (CosSinObsWrapper,
+                                       GlobalFrameActionWrapper,
+                                       KeepObsWrapper,
+                                       RemoveAngleActionWrapper,
+                                       RepeatActionWrapper)
+from jax import vmap
+
+from mbse.utils.replay_buffer import EpisodicReplayBuffer
 
 __all__ = ['BaseRobomasterEnv', 'RobomasterEnv', 'create_maze_env', 'MazeEnv', 'init_robot', 'MazeGoalEnv', 'PositionControlEnv', 'SpotGym']
 GOAL = (2.5, 1.8)
@@ -87,3 +104,45 @@ def create_spot_env(
     env = Spot2DEnv(cmd_freq, monitor_freq, log_dir=log_dir)
     env.initialize_robot(hostname)
     return env
+
+def load_episodic_dataset(
+        buffer_path: str,
+        usepast: Optional[int] = None,
+        usepastact: bool = False,
+        goal = None
+        ):
+    """
+    Parameters
+        buffer_path: path to input buffer
+        usepast: number of past observations to include in sampled observation
+        usepastact: whether to include past actions in sampled observation
+        goal: goal position (x, y, theta)
+    """
+    data = pickle.load(open(buffer_path, 'rb'))
+    obs_shape = (7,)
+    action_shape = (3,)
+    #hide_in_obs = [0,1,2,3]
+    hide_in_obs = None
+    assert isinstance(data, EpisodicReplayBuffer)
+    buffer = EpisodicReplayBuffer(
+        obs_shape=obs_shape,
+        action_shape=action_shape,
+        normalize=True,
+        action_normalize=True,
+        learn_deltas=True,
+        use_history=usepast,
+        use_action_history=usepastact,
+        hide_in_obs=hide_in_obs
+    )
+    if goal is not None:
+        reward_model = Spot2DReward()
+        reward_fn = vmap(reward_model.predict)
+    for i in range(data.num_episodes):
+        tran = data.get_episode(i)
+        if goal is not None:
+            tran.obs[:] = change_spot2d_obs_frame(tran.obs, goal[:2], goal[2])
+            tran.next_obs[:] = change_spot2d_obs_frame(tran.next_obs, goal[:2], goal[2])
+            tran.reward[:,0] = reward_fn(tran.next_obs, tran.action)[:]
+        buffer.add(tran)
+
+    return buffer

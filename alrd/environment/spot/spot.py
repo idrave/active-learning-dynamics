@@ -1,42 +1,37 @@
-from __future__ import print_function, annotations
+from __future__ import annotations 
 
-import traceback
-from dataclasses import dataclass, field
+import logging
+import queue
+import threading
 import time
-from typing import Optional, Tuple, Any 
+import traceback
+from dataclasses import dataclass 
 from enum import Enum
-from pathlib import Path
+from typing import Optional, Tuple
 
-from alrd.environment.spot.command import Command, OrientationCommand, CommandEnum, MobilityCommand
-from alrd.environment.spot.robot_state import SpotState
-from alrd.utils import get_timestamp_str, rotate_2d_vector
-
-import bosdyn.api.basic_command_pb2 as basic_command_pb2
 import bosdyn.client
 import bosdyn.client.estop
 import bosdyn.client.util
+import numpy as np
+from alrd.environment.spot.command import Command 
+from alrd.environment.spot.robot_state import SpotState
+from alrd.utils import rotate_2d_vector
 from bosdyn.api import estop_pb2
-from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from bosdyn.client import frame_helpers
 from bosdyn.client.estop import EstopClient
 from bosdyn.client.lease import LeaseClient, ResourceAlreadyClaimedError
-from bosdyn.client.robot_command import RobotCommandBuilder, RobotCommandClient, block_for_trajectory_cmd, blocking_stand, blocking_sit
+from bosdyn.client.robot_command import (RobotCommandBuilder,
+                                         RobotCommandClient,
+                                         block_for_trajectory_cmd,
+                                         blocking_sit, blocking_stand)
 from bosdyn.client.robot_state import RobotStateClient
-from bosdyn.geometry import EulerZXY
-
 from scipy.spatial.transform import Rotation as R
-import gym
-from gym import spaces
-import logging
-import threading
-import numpy as np
-import queue
 
 ##### Boundaries of the environment #####
 MINX = -2.0
 MAXX = 2.0
-MINY = -1.0
-MAXY = 1.0
+MINY = -1.4
+MAXY = 1.4
 ##### Spot parameters #####
 MAX_SPEED = 1.6                     # Maximum linear velocity of the robot (m/s)
 MAX_ANGULAR_SPEED = 1.5             # Maximum angular velocity of the robot (rad/s)
@@ -219,7 +214,7 @@ class SpotGymBase(object):
         while not check_until_done_future.done() and (timeout is None or time.time() - start < timeout):
             time.sleep(READ_STATE_SLEEP_PERIOD)
         if check_until_done_future.done():
-            return SpotState(check_until_done_future.result())
+            return SpotState.from_robot_state(time.time(), check_until_done_future.result())
         else:
             return None
 
@@ -350,8 +345,8 @@ class SpotGymStateMachine(SpotGymBase):
         assert state is not None
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
         theta = R.from_quat([qx, qy, qz, qw]).as_euler('xyz')[2]
-        self._origin = (x, y, theta)
-        self.logger.info("Origin: {}".format(self._origin))
+        self._startpos = (x, y, theta)
+        self.logger.info("Start position: {}".format(self._startpos))
         self.__cmd_event.clear()
         self.__reset_event.clear()
         self.__stop_event.clear()
@@ -401,9 +396,6 @@ class SpotGymStateMachine(SpotGymBase):
             self._shutdown()
         self.logger.info("Closed")
 
-    def _handle_signal(self):
-        self.close()
-
     def __cmd_loop(self):
         try:
             self.__cmd_event.wait()
@@ -439,7 +431,7 @@ class SpotGymStateMachine(SpotGymBase):
         try:
             self.__reset_event.wait()
             while self.__state != State.SHUTDOWN:
-                result = self._issue_goal_pose_command(*self._origin)
+                result = self._issue_goal_pose_command(*self._startpos)
                 self.__reset_event.clear()
                 self.__queue.put(StateMachineRequest(StateMachineAction.RESET_DONE, result))
                 self.__reset_event.wait()
@@ -489,8 +481,8 @@ class SpotGymStateMachine(SpotGymBase):
         except Exception as e:
             self.logger.error("Error in shutdown loop:")
             traceback.print_exc()
-            self._shutdown()
             self.__state = State.SHUTDOWN
+            self._shutdown()
 
     def _issue_shutdown(self) -> Tuple[bool, None]:
         request = StateMachineRequest(StateMachineAction.SHUTDOWN)
@@ -499,7 +491,7 @@ class SpotGymStateMachine(SpotGymBase):
         return result if result is not None else (False, None)
 
     def is_in_bounds(self, state: SpotState) -> bool:
-        x0, y0, a0 = self._origin
+        x0, y0, a0 = self._startpos
         x, y, _, _, _, _, _ = state.pose_of_body_in_vision
         x -= x0
         y -= y0
@@ -546,6 +538,7 @@ class SpotGymStateMachine(SpotGymBase):
                     request = self.__queue.get(timeout=wait)
                 except queue.Empty:
                     continue
+                assert isinstance(request, StateMachineRequest)
                 if request.action == StateMachineAction.STEP:
                     if self.__state == State.READY:
                         self.__state = State.RUNNING
@@ -563,7 +556,7 @@ class SpotGymStateMachine(SpotGymBase):
                         latest_order = None
                         if new_state is None or oob: # next state could not be read or out of bounds
                             if oob:
-                                self.logger.info(f"Robot out of bounds after step. state {new_state.pose_of_body_in_vision}. origin {self._origin}. Stopping.")
+                                self.logger.info(f"Robot out of bounds after step. state {new_state.pose_of_body_in_vision}. origin {self._startpos}. Stopping.")
                             else:
                                 self.logger.info("Robot state could not be read after step. Stopping.")
                             self.__state = State.STOPPING
@@ -668,157 +661,5 @@ class SpotGymStateMachine(SpotGymBase):
             traceback.print_exc()
             if latest_order is not None:
                 latest_order.set_feedback((False, None))
-            self._shutdown()
             self.__state = State.SHUTDOWN
-        
-    def _handle_signal(self): # TODO: may want to have close function that works for these cases
-        super()._handle_signal()
-        self.__state = State.SHUTDOWN
-
-class SpotGym(SpotGymStateMachine, gym.Env):
-    def __init__(self, cmd_freq: float, monitor_freq: float = 30, truncate_on_timeout: bool = True,
-                 log_dir: str | Path | None = None):
-        """
-        monitor_freq: Environment's maximum state monitoring frequency for checking position boundaries.
-        cmd_freq: Environment's maximum action frequency. Commands will take at least 1/cmd_freq seconds to execute.
-        truncate_on_timeout: If True, the episode will end when a robot command takes longer than STEP_TIMEOUT seconds.
-        """
-        super().__init__(monitor_freq=monitor_freq)
-        assert 1/monitor_freq <= MAX_TIMEOUT + 1e-5, "Monitor frequency must be higher than 1/{} Hz to ensure safe navigation".format(MAX_TIMEOUT)
-        assert 1/cmd_freq <= COMMAND_DURATION + 1e-5, "Command frequency must be higher than 1/COMMAND_DURATION ({} Hz) ".format(1/COMMAND_DURATION)
-        self.__cmd_freq = cmd_freq
-        self.log_dir = Path(log_dir) if log_dir is not None else Path("output/spot")
-        self.log_file = None
-        self.__should_reset = True
-        self.truncate_on_timeout = truncate_on_timeout
-        self.logger.addHandler(logging.FileHandler(self.log_dir / "spot_gym.log"))
-    
-    def initialize_robot(self, hostname):
-        super().initialize_robot(hostname)
-    
-    def start(self):
-        if not self.log_dir.is_dir():
-            self.log_dir.mkdir(exist_ok=False, parents=True)
-        super().start()
-        filepath = self.log_dir / ('session-'+get_timestamp_str() + ".txt")
-        self.log_file = open(filepath, "w")
-        self.logger.info(f"Printing to {filepath}")
-
-    def close(self):
-        super().close()
-        self.__should_reset = True
-        self.log_file.close()
-    
-    def print_to_file(self, command: MobilityCommand, state: SpotState, currentTime):
-        self.log_file.write("time {{\n \tvalue: {:.5f} \n}}\n".format(currentTime))
-        self.log_file.write(command.to_str())
-        self.log_file.write(state.to_str())
-    
-    def stop_robot(self) -> bool:
-        if not self.isopen:
-            raise RuntimeError("Environment is closed but stop was called.")
-        self.__should_reset = True
-        return self._issue_stop()
-
-    def _shutdown(self):
-        super()._shutdown()
-        if self.log_file is not None:
-            self.log_file.close()
-
-    @property
-    def should_reset(self):
-        return self.__should_reset
-    
-    def _step(self, cmd: Command) -> Optional[Tuple[Optional[SpotState], float, float]]:
-        """
-        Apply the command for as long as the command period specified.
-        Returns:
-            new_state: The new state of the robot after the command is applied.
-            cmd_time: The time it took to issue the command + read the state.
-            read_time: The time it took to read the state of the robot.
-        """
-        if not self.isopen or self.should_reset:
-            raise RuntimeError("Environment is closed or should be reset but step was called.")
-        start_cmd = time.time()
-        success, result = self._issue_command(cmd, 1/self.__cmd_freq)
-        if not success:
-            self.__should_reset = True
-            return None
-        next_state, read_time, oob = result
-        if next_state is None or oob:
-            self.__should_reset = True
-            return None, time.time() - start_cmd, read_time 
-        if cmd.cmd_type == CommandEnum.MOBILITY:
-            self.print_to_file(cmd, next_state, time.time())
-        cmd_time = time.time() - start_cmd
-        if self.truncate_on_timeout and cmd_time > STEP_TIMEOUT:
-            self.logger.warning("Command took longer than {} seconds. Stopping episode.".format(STEP_TIMEOUT))
-            self.__should_reset = True
-            return None, cmd_time, read_time
-        return next_state, cmd_time, read_time
-    
-    def _reset(self) -> Optional[Tuple[Optional[SpotState], float]]:
-        """
-        Reset the robot to the origin.
-        """
-        if not self.isopen:
-            raise RuntimeError("Environment is closed but reset was called.")
-            
-        self.logger.info("Reset called, stopping robot...")
-        success = self._issue_stop()
-        if not success:
-            self.logger.error("Reset stop failed")
-            return None
-        input("Press enter to reset the robot to the origin... ")
-        # reset position
-        success, _ = self._issue_reset()
-        if not success:
-            self.logger.error("Failed to reset robot position")
-            return None
-        input("Reset done. Press enter to continue.")
-        start = time.time()
-        new_state = self._read_robot_state()
-        read_time = time.time() - start
-        self.__should_reset = False
-        return new_state, read_time
-    
-class Spot2DEnv(SpotGym):
-    def __init__(self, cmd_freq: float, monitor_freq: float = 30, log_dir: str | Path | None = None):
-        super().__init__(cmd_freq, monitor_freq, log_dir=log_dir)
-        self.observation_space = spaces.Box(low=np.array([MINX, MINY, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
-                                            high=np.array([MAXX, MAXY, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
-        self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
-                                        high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
-
-    def get_reward(self, action: np.ndarray, next_state: np.ndarray) -> float:
-        return 0.0
-
-    def _get_obs_from_state(self, state: SpotState) -> np.ndarray:
-        x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
-        rotation = R.from_quat([qx, qy, qz, qw]).as_euler("xyz")
-        angle = rotation[2]
-        vx, vy, _, _, _, w = state.velocity_of_body_in_vision
-        return np.array([x, y, np.cos(angle), np.sin(angle), vx, vy, w])
-
-    def step(self, action: np.ndarray) -> Optional[Tuple[Optional[np.ndarray], float, bool, bool, dict]]: 
-        cmd = MobilityCommand(action[0], action[1], action[2], height=0.0, pitch=0.0, locomotion_hint=spot_command_pb2.HINT_AUTO, stair_hint=0)
-        result = self._step(cmd)
-        if result is None:
-            return None, 0., False, True, {}
-        next_state, cmd_time, read_time = result
-        info = {"cmd_time": cmd_time, "read_time": read_time}
-        if next_state is None:
-            return None, 0., False, True, info
-        obs = self._get_obs_from_state(next_state)
-        return obs, self.get_reward(action, obs), False, False, info
-    
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
-        result = self._reset()
-        if result is None:
-            return None, {}
-        super().reset(seed=seed, options=options)
-        state, read_time = result
-        info = {"read_time": read_time}
-        if state is None:
-            return None, info
-        return self._get_obs_from_state(state), info
+            self._shutdown()
