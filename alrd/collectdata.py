@@ -64,7 +64,8 @@ def init_filter(freq, use_acc):
                             init_cov = 0.01 * np.diag([1, 1]),
                             use_acc=False, pred_displ=True)
 
-def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], buffer, truncated_vec, info_list, max_steps, buffer_size, use_tqdm):
+def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], buffer, truncated_vec, info_list, max_steps,
+                        buffer_size, use_tqdm):
     num_points = max_steps
     obs_space =  env.observation_space.shape
     action_space =  env.action_space.shape
@@ -124,6 +125,7 @@ def add_common_args(main_parser: argparse.ArgumentParser):
     main_parser.add_argument('-e', '--episode_len', default=None, type=int, help='Maximum episode length')
     main_parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency at which commands are supplied to the environment')
     main_parser.add_argument('--noactnorm', action='store_true', help='Set action normalization to False in replay buffer')
+    main_parser.add_argument('--seed', default=0, type=int, help='Randomization seed')
 
 def add_robomaster_parser(parser: argparse.ArgumentParser):
     # Environment arguments
@@ -142,7 +144,6 @@ def add_robomaster_parser(parser: argparse.ArgumentParser):
     # Agent arguments
     agent_parser = parser.add_argument_group('Agent arguments')
     agent_parser.add_argument('-a', '--agent', default=AgentType.KEYBOARD, type=AgentType, help='Agent to use', choices=[a for a in AgentType])
-    agent_parser.add_argument('--seed', default=0, type=int, help='Seed for random action sampling')
     agent_parser.add_argument('--xy_speed', default=0.5, type=float, help='Speed of the agent in the xy plane')
     agent_parser.add_argument('--a_speed', default=120, type=float, help='Angular speed of the agent')
     agent_parser.add_argument('--length_scale', default=1, type=float, help='Length scale of the GP agent')
@@ -157,11 +158,15 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     parser.add_argument('hostname', type=str, help='Hostname of the spot robot')
     parser.add_argument('--monitor', type=int, default=30, help='Frequency at which the environment checks if the robot is within boundaries')
     parser.add_argument('-a', '--agent', default=SpotAgentEnum.KEYBOARD.value, type=str, help='Agent to use', choices=[a.value for a in SpotAgentEnum])
+    parser.add_argument('--smoothing', default=None, type=float, help='Smoothing factor for the actions')
+    parser.add_argument('--optimizer_checkpoint', default=None, type=str, help='Path to optimizer checkpoint')
+    parser.add_argument('--query_goal', action='store_true', help='Whether to query the goal from the user at every reset')
 
 def collect_data(args):
     output_dir = Path('output')/'data'/('%s-%s'%(args.tag,get_timestamp_str()))
     output_dir.mkdir()
     yaml.dump(vars(args), open(output_dir/'args.yaml', 'w'))
+    rng = jax.random.PRNGKey(args.seed)
     if args.robot == 'robomaster':
         env = create_robomaster_env(
             poscontrol=args.poscontrol,
@@ -178,7 +183,8 @@ def collect_data(args):
             xy_speed=args.xy_speed,
             a_speed=args.a_speed
         )
-        args.agent_rng = jax.random.PRNGKey(args.seed)
+        rng, agent_rng = jax.random.split(rng)
+        args.agent_rng = agent_rng
         args.reward_model = env.unwrapped.reward
         agent = args.agent(args)
         if args.repeat_action is not None:
@@ -196,10 +202,17 @@ def collect_data(args):
             hostname=args.hostname,
             cmd_freq=args.freq,
             monitor_freq=args.monitor,
-            log_dir=output_dir
+            log_dir=output_dir,
+            query_goal=args.query_goal
         )
+        rng, agent_rng = jax.random.split(rng)
         agent = create_spot_agent(
-            agent_type=agent_type
+            observation_space=env.observation_space,
+            action_space=env.action_space,
+            agent_type=agent_type,
+            optimizer_path=args.optimizer_checkpoint,
+            smoothing_coeff=args.smoothing,
+            rng=agent_rng
         )
         buffer = EpisodicReplayBuffer(
             obs_shape=env.observation_space.shape,

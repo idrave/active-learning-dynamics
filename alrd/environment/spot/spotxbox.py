@@ -146,7 +146,7 @@ class SpotXbox(SpotGymBase):
             "\t1. Acquire a software E-Stop (Left Button + Right Button + B). \n" + \
             "\t2. Obtain a lease and power on the robot's motors (Start button).")
 
-    def _issue_robot_command(self, command):
+    def _issue_robot_command(self, command, endtime=None):
         """Issues the robot command.
 
         Args:
@@ -154,7 +154,7 @@ class SpotXbox(SpotGymBase):
         """
 
         self.last_cmd = command
-        super()._issue_robot_command(command)
+        super()._issue_robot_command(command, endtime=endtime)
 
     def _jog(self):
         """Sets robot in Jog mode.

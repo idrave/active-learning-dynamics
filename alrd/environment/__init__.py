@@ -16,6 +16,7 @@ from alrd.environment.spot.robot_state import KinematicState
 from alrd.environment.spot.spot2d import (Spot2DEnv, Spot2DReward,
                                           change_spot2d_obs_frame)
 from alrd.environment.spot.spotgym import SpotGym
+from alrd.environment.spot.wrappers import QueryGoalWrapper
 from alrd.environment.wrappers import (CosSinObsWrapper,
                                        GlobalFrameActionWrapper,
                                        KeepObsWrapper,
@@ -97,12 +98,15 @@ def create_spot_env(
         hostname: str,
         cmd_freq: float,
         monitor_freq: float = 30,
-        log_dir: str | Path | None = None):
+        log_dir: str | Path | None = None,
+        query_goal: bool = False):
     """
     Creates and initializes spot environment.
     """
     env = Spot2DEnv(cmd_freq, monitor_freq, log_dir=log_dir)
     env.initialize_robot(hostname)
+    if query_goal:
+        env = QueryGoalWrapper(env)
     return env
 
 def load_episodic_dataset(

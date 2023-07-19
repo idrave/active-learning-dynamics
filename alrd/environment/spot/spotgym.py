@@ -10,10 +10,10 @@ from typing import Any, Optional, Tuple
 import gym
 import numpy as np
 from alrd.environment.spot.command import Command
-from alrd.environment.spot.record import Session
+from alrd.environment.spot.record import Session, Episode
 from alrd.environment.spot.robot_state import SpotState
-from alrd.environment.spot.spot import (COMMAND_DURATION, MAX_TIMEOUT,
-                                        STEP_TIMEOUT, SpotGymStateMachine)
+from alrd.environment.spot.spot import (COMMAND_DURATION, CHECK_TIMEOUT,
+                                        SpotGymStateMachine)
 from alrd.utils import get_timestamp_str
 
 
@@ -30,11 +30,11 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             log_str: If True, command and state info is logged as a string to a file.
         If log_dir is not None and session is not None, session data will be dumped after each episode.
         """
-        super().__init__(monitor_freq=monitor_freq)
-        assert 1/monitor_freq <= MAX_TIMEOUT + 1e-5, "Monitor frequency must be higher than 1/{} Hz to ensure safe navigation".format(MAX_TIMEOUT)
+        assert 1/monitor_freq <= CHECK_TIMEOUT + 1e-5, "Monitor frequency must be higher than 1/{} Hz to ensure safe navigation".format(CHECK_TIMEOUT)
         assert 1/cmd_freq <= COMMAND_DURATION + 1e-5, "Command frequency must be higher than 1/COMMAND_DURATION ({} Hz) ".format(1/COMMAND_DURATION)
         assert session is None or log_dir is not None, "If session is not None, log_dir must be specified"
         assert not log_str or log_dir is not None, "If log_str is True, log_dir must be specified"
+        super().__init__(monitor_freq=monitor_freq)
         self.__cmd_freq = cmd_freq
         self.__should_reset = True
         self.__last_robot_state = None
@@ -85,7 +85,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         self.__should_reset = True
         self.__last_robot_state = None
         if self.log_dir is not None:
-            if self.log_str:
+            if self.log_str and self.log_file is not None:
                 self.log_file.close()
                 self.log_file = None
             if self.session is not None and self.__current_episode is not None and len(self.__current_episode) > 0:
@@ -106,15 +106,15 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         start_cmd = time.time()
         success, result = self._issue_command(cmd, 1/self.__cmd_freq)
         if not success:
-            self._end_episode()
+            self.stop_robot()
             return None
         next_state, read_time, oob = result
         if next_state is None or oob:
-            self._end_episode()
+            self.stop_robot()
             return None, time.time() - start_cmd, read_time
         cmd_time = time.time() - start_cmd
-        if self.truncate_on_timeout and cmd_time > STEP_TIMEOUT:
-            self.logger.warning("Command took longer than {} seconds. Stopping episode.".format(STEP_TIMEOUT))
+        if self.truncate_on_timeout and cmd_time > COMMAND_DURATION:
+            self.logger.warning("Command took longer than {} seconds. Stopping episode.".format(COMMAND_DURATION))
             self.stop_robot()
             return None, cmd_time, read_time
         return next_state, cmd_time, read_time
@@ -141,9 +141,9 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         if next_state is None:
             return None, 0., False, True, info
         obs = self.get_obs_from_state(next_state)
-        reward = self.get_reward(action, next_state)
+        reward = self.get_reward(action, obs)
         if self.session is not None:
-            self.session.add(cmd, next_state, reward, False)
+            self.__current_episode.add(cmd, next_state, reward, False)
         if self.log_str:
             self.print_to_file(cmd, self.__last_robot_state, time.time())
         self.__last_robot_state = next_state
@@ -172,6 +172,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         read_time = time.time() - start
         self.__should_reset = False
         self.__last_robot_state = new_state
+        self.__current_episode = Episode(new_state)
         return new_state, read_time
 
     def reset(self, seed: int | None = None, options: dict | None = None) -> Tuple[np.ndarray | None, dict]:

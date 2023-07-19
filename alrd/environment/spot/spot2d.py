@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import pickle
+import functools
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
-import jax
+from jax import jit 
 import jax.numpy as jnp
 import numpy as np
 from alrd.environment.spot.command import Command, CommandEnum
@@ -29,7 +29,7 @@ class Spot2DReward(RewardModel):
         self._goal_pos = jnp.array(goal_pos) if goal_pos is not None else jnp.zeros((2))
         self._tolerance = get_tolerance_fn(bounds=(0,0.1), margin=1., sigmoid='gaussian')
 
-    @jax.partial(jax.jit, static_argnums=0) # assumes object is static
+    @functools.partial(jit, static_argnums=0) # assumes object is static
     def predict(self, obs, action, next_obs=None, rng=None):
         x, y, cos, sin = obs[:4]
         front_x, front_y = get_front_coord(x, y, cos, sin)
@@ -46,8 +46,11 @@ class Spot2DEnv(SpotGym):
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                         high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.goal_pos = None # goal position in vision frame
-        self._vision_origin = change_frame_2d(np.array([0, 0]), self._startpos[:2], self._startpos[2], degrees=False) # vision frame origin relative to environment frame
         self.reward = Spot2DReward()
+    
+    def start(self):
+        super().start()
+        self._vision_origin = change_frame_2d(np.array([0, 0]), self._startpos[:2], self._startpos[2], degrees=False) # vision frame origin relative to environment frame
 
     def get_obs_from_state(self, state: SpotState) -> np.ndarray:
         """
@@ -76,6 +79,8 @@ class Spot2DEnv(SpotGym):
         return self.reward.predict(next_obs, action)
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
+        if options is None:
+            options = {}
         goal = options.get("goal", None) # optional goal expressed relative to environment frame
         if goal is None:
             self.goal_pos = self._startpos[:2]

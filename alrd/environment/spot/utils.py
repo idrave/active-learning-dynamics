@@ -9,17 +9,17 @@ DIST_TO_FRONT = 0.55
 SPOT_LENGTH = 1.1
 SPOT_WIDTH = 0.5
 
-def get_front_coord(x: float, y: float, angle: float) -> Tuple[float, float]:
-    cos, sin = np.cos(angle), np.sin(angle)
+def get_front_coord(x: float, y: float, cos: float, sin: float) -> Tuple[float, float]:
     return x + cos * DIST_TO_FRONT, y + sin * DIST_TO_FRONT
 
-def get_hitbox(x: float, y: float, cos: float, sin: float) -> np.ndarray:
+def get_hitbox(x: float, y: float, angle: float) -> np.ndarray:
     """
     Returns the coordinates of the hitbox of the robot in the given frame.
 
     Returns:
         np.ndarray: 4x2 array of coordinates of the hitbox (front left, front right, back right, back left)
     """
+    cos, sin = np.cos(angle), np.sin(angle)
     v_front = np.array(get_front_coord(0, 0, cos, sin))
     v_back = np.array([-cos * (SPOT_LENGTH - DIST_TO_FRONT), -sin * (SPOT_LENGTH - DIST_TO_FRONT)])
     v_left = np.array([-sin * SPOT_WIDTH / 2, cos * SPOT_WIDTH / 2])

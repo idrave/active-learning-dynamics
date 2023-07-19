@@ -187,12 +187,12 @@ class ManipulatorState:
                                                         manipulator_state.estimated_end_effector_force_in_hand.z)
         linear_velocity = manipulator_state.velocity_of_hand_in_vision.linear
         angular_velocity = manipulator_state.velocity_of_hand_in_vision.angular
-        velocity_of_hand_in_vision = SE3Velocity(linear_velocity.x, linear_velocity.y, linear_velocity.z,
-                                                    angular_velocity.x, angular_velocity.y, angular_velocity.z)
+        velocity_of_hand_in_vision = SE3Velocity(Vector3D(linear_velocity.x, linear_velocity.y, linear_velocity.z),
+                                                 Vector3D(angular_velocity.x, angular_velocity.y, angular_velocity.z))
         linear_velocity = manipulator_state.velocity_of_hand_in_odom.linear
         angular_velocity = manipulator_state.velocity_of_hand_in_odom.angular
-        velocity_of_hand_in_odom = SE3Velocity(linear_velocity.x, linear_velocity.y, linear_velocity.z,
-                                                    angular_velocity.x, angular_velocity.y, angular_velocity.z)
+        velocity_of_hand_in_odom = SE3Velocity(Vector3D(linear_velocity.x, linear_velocity.y, linear_velocity.z),
+                                                Vector3D(angular_velocity.x, angular_velocity.y, angular_velocity.z))
         pose_of_hand_in_body = get_a_tform_b(robot_state.kinematic_state.transforms_snapshot, BODY_FRAME_NAME, HAND_FRAME_NAME)
         pose_of_hand = SE3Pose(Vector3D(pose_of_hand_in_body.position.x, pose_of_hand_in_body.position.y, pose_of_hand_in_body.position.z),
                                Quaternion(pose_of_hand_in_body.rotation.w, pose_of_hand_in_body.rotation.x, pose_of_hand_in_body.rotation.y, pose_of_hand_in_body.rotation.z))

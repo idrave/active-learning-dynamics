@@ -29,27 +29,22 @@ from bosdyn.client.robot_state import RobotStateClient
 from scipy.spatial.transform import Rotation as R
 
 ##### Boundaries of the environment #####
-MINX = -2.0
-MAXX = 2.0
+MINX = -1.8
+MAXX = 1.8
 MINY = -1.4
 MAXY = 1.4
 ##### Spot parameters #####
 MAX_SPEED = 1.6                     # Maximum linear velocity of the robot (m/s)
 MAX_ANGULAR_SPEED = 1.5             # Maximum angular velocity of the robot (rad/s)
 MARGIN = 0.16                       # Margin to the walls within which the robot is stopped (m)
-MAX_TIMEOUT = MARGIN / MAX_SPEED    # Maximum time the boundary check will wait for state reading (s)
+CHECK_TIMEOUT = MARGIN / MAX_SPEED  # Maximum time the boundary check will wait for state reading (s)
 STAND_TIMEOUT = 10.0                # Maximum time to wait for the robot to stand up (s)
 POSE_TIMEOUT = 10.0                 # Maximum time to wait for the robot to reach a pose (s)
-#RESET_TIMEOUT = POSE_TIMEOUT        # Maximum time to wait for the robot to reach the reset pose (s)
-READ_STATE_SLEEP_PERIOD = 0.01      # Period defining how often we check if a state read request is finished (s)
-STEPWAIT = 0.5                      # Maximum fraction of the command period to wait in step fucnction: TODO check this value
-#RESET_POS_TOLERANCE = 0.1 # tolerance for the robot to be considered in the reset position
-#RESET_ANGLE_TOLERANCE = np.pi/18 # tolerance for the robot to be considered in the reset angle
-COMMAND_DURATION = 0.5              # Duration of regular commands sent to spot (while not replaced by new command) (s)
 SHUTDOWN_TIMEOUT = 10.0             # Maximum time to wait for the robot to shut down (s)
-STEP_TIMEOUT = COMMAND_DURATION     # Maximum time to wait for the environment to execute a step (s)
-MAX_MAIN_WAIT = 10.0                # TODO: specify this in class instead of here
+READ_STATE_SLEEP_PERIOD = 0.01      # Period defining how often we check if a state read request is finished (s)
 EXPECTED_STATE_READ_TIME = 0.02     # Expected time for the robot to read its state (s)
+COMMAND_DURATION = 0.5              # Duration of regular commands sent to spot (while not replaced by new command) (s)
+MAX_MAIN_WAIT = 10.0                # Maximum time the state machine main loop sleeps
 
 class SpotGymBase(object):
     """SpotGym class initializes the robot and provides methods to control it and read the state.
@@ -504,7 +499,7 @@ class SpotGymStateMachine(SpotGymBase):
         try:
             self.__check_bounds.wait()
             while self.__state not in {State.SHUTDOWN, State.SHUTTING_DOWN}:
-                new_state = self._read_robot_state(timeout = MAX_TIMEOUT - 1/self.__freq)
+                new_state = self._read_robot_state(timeout = CHECK_TIMEOUT - 1/self.__freq)
                 self.__check_bounds.clear()
                 if new_state is None:
                     self.logger.debug('Bounds srv: timed out')

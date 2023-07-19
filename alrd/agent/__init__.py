@@ -1,12 +1,17 @@
+from __future__ import annotations
 from alrd.agent.absagent import Agent, AgentReset
 from alrd.agent.gp import RandomGPAgent, PiecewiseRandomGPAgent, create_async_rbf_gp_agent
 from alrd.agent.keyboard import KeyboardAgent, KeyboardGPAgent, KeyboardResetAgent
 from alrd.agent.xbox import SpotXbox2D
 from alrd.agent.trajaxopt import TraJaxOptAgent
 from alrd.agent.adapter import AgentAdapter
+from alrd.agent.model_based import ModelBasedAgentAdapter
+from mbse.agents.model_based.model_based_agent import ModelBasedAgent
 from mbse.utils.agent_checkpoint import SACCheckpoint
 from enum import Enum
 import pickle
+import jax
+import cloudpickle
 
 class AgentType(Enum):
     KEYBOARD = 'keyboard'
@@ -53,13 +58,19 @@ class AgentType(Enum):
 class SpotAgentEnum(Enum):
     KEYBOARD='keyboard'
     XBOX='xbox'
+    SAC='sac'
 
-def create_spot_agent(agent_type: SpotAgentEnum):
+def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum, optimizer_path: str | None,
+                      smoothing_coeff: float | None, rng):
     if agent_type == SpotAgentEnum.KEYBOARD:
         base_agent = KeyboardAgent(xy_speed=1, a_speed=1)
         return KeyboardResetAgent(base_agent)
     elif agent_type == SpotAgentEnum.XBOX:
         return SpotXbox2D()
+    elif agent_type == SpotAgentEnum.SAC:
+        sac_optimizer = cloudpickle.load(open(optimizer_path, 'rb'))
+        agent = ModelBasedAgent.create_from_optimizer(observation_space, action_space, sac_optimizer, smoothing_coeff=smoothing_coeff)
+        return ModelBasedAgentAdapter(agent, rng)
     else:
         raise NotImplementedError(f'Agent type {agent_type} not implemented')
 
