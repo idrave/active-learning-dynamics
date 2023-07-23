@@ -13,12 +13,12 @@ from alrd.environment.spot.command import Command
 from alrd.environment.spot.record import Session, Episode
 from alrd.environment.spot.robot_state import SpotState
 from alrd.environment.spot.spot import (COMMAND_DURATION, CHECK_TIMEOUT,
-                                        SpotGymStateMachine)
+                                        SpotGymStateMachine, SpotEnvironmentConfig)
 from alrd.utils import get_timestamp_str
 
 
 class SpotGym(SpotGymStateMachine, gym.Env, ABC):
-    def __init__(self, cmd_freq: float, monitor_freq: float = 30, truncate_on_timeout: bool = True,
+    def __init__(self, config: SpotEnvironmentConfig, cmd_freq: float, monitor_freq: float = 30, truncate_on_timeout: bool = True,
                  log_dir: str | Path | None = None, session: Session | None = None, log_str: bool = False):
         """
         Parameters:
@@ -34,7 +34,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         assert 1/cmd_freq <= COMMAND_DURATION + 1e-5, "Command frequency must be higher than 1/COMMAND_DURATION ({} Hz) ".format(1/COMMAND_DURATION)
         assert session is None or log_dir is not None, "If session is not None, log_dir must be specified"
         assert not log_str or log_dir is not None, "If log_str is True, log_dir must be specified"
-        super().__init__(monitor_freq=monitor_freq)
+        super().__init__(config, monitor_freq=monitor_freq)
         self.__cmd_freq = cmd_freq
         self.__should_reset = True
         self.__last_robot_state = None
@@ -46,9 +46,6 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         self.truncate_on_timeout = truncate_on_timeout
         if log_dir is not None:
             self.logger.addHandler(logging.FileHandler(self.log_dir / "spot_gym.log"))
-
-    def initialize_robot(self, hostname):
-        super().initialize_robot(hostname)
 
     def start(self):
         if not self.log_dir.is_dir():

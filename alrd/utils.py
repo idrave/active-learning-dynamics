@@ -57,6 +57,27 @@ def change_frame_2d(vector, origin, angle, degrees=True):
     """
     return rotate_2d_vector(vector - origin, -angle, degrees=degrees)
 
+class Frame2D:
+    def __init__(self, x, y, angle) -> None:
+        """
+        Parameters:
+            x, y: origin of the frame with respect to the global frame
+            angle: angle of the frame's axis with respect to the global frame's axis in radians
+        """
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.__inverse = change_frame_2d(np.array([0,0]), (x,y), angle, degrees=False)
+    
+    def transform(self, vector):
+        return change_frame_2d(vector, (self.x, self.y), self.angle, degrees=False)
+    
+    def inverse(self, vector):
+        return change_frame_2d(vector, self.__inverse, -self.angle, degrees=False)
+    
+    def __str__(self) -> str:
+        return f"Frame2D(x={self.x}, y={self.y}, angle={self.angle})"
+
 def sleep_ms(miliseconds):
     start = time.time()
     while time.time() - start < miliseconds / 1000:

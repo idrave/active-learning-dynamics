@@ -7,7 +7,9 @@ from alrd.agent.trajaxopt import TraJaxOptAgent
 from alrd.agent.adapter import AgentAdapter
 from alrd.agent.model_based import ModelBasedAgentAdapter
 from mbse.agents.model_based.model_based_agent import ModelBasedAgent
-from mbse.utils.agent_checkpoint import SACCheckpoint
+from mbse.models.wrappers import ActionSmoothing
+from mbse.agents.model_based.smooth_agent import SmoothAgent
+from mbse.optimizers.sac_based_optimizer import SACOptimizer
 from enum import Enum
 import pickle
 import jax
@@ -69,7 +71,24 @@ def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum
         return SpotXbox2D()
     elif agent_type == SpotAgentEnum.SAC:
         sac_optimizer = cloudpickle.load(open(optimizer_path, 'rb'))
-        agent = ModelBasedAgent.create_from_optimizer(observation_space, action_space, sac_optimizer, smoothing_coeff=smoothing_coeff)
+        assert isinstance(sac_optimizer, SACOptimizer)
+        if smoothing_coeff is not None:
+            agent = SmoothAgent(
+                action_space=action_space,
+                observation_space=observation_space,
+                dynamics_model=sac_optimizer.dynamics_model,
+                smoothing_coeff=smoothing_coeff,
+                smoothing_ind=[4, 5, 6],
+                policy_optimizer_name='SacOpt'
+            )
+        else:
+            agent = ModelBasedAgent(
+                action_space=action_space,
+                observation_space=observation_space,
+                dynamics_model=sac_optimizer.dynamics_model,
+                policy_optimizer_name='SacOpt'
+            )
+        agent.update_optimizer(sac_optimizer)
         return ModelBasedAgentAdapter(agent, rng)
     else:
         raise NotImplementedError(f'Agent type {agent_type} not implemented')

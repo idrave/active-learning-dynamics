@@ -5,8 +5,9 @@ import queue
 import threading
 import time
 import traceback
-from dataclasses import dataclass 
+from dataclasses import dataclass, asdict 
 from enum import Enum
+import yaml
 from typing import Optional, Tuple
 
 import bosdyn.client
@@ -15,8 +16,8 @@ import bosdyn.client.util
 import numpy as np
 from alrd.environment.spot.command import Command 
 from alrd.environment.spot.robot_state import SpotState
-from alrd.environment.spot.utils import get_hitbox
-from alrd.utils import rotate_2d_vector, change_frame_2d
+from alrd.environment.spot.utils import MAX_SPEED, get_hitbox
+from alrd.utils import change_frame_2d, Frame2D
 from bosdyn.api import estop_pb2
 from bosdyn.client import frame_helpers
 from bosdyn.client.estop import EstopClient
@@ -28,14 +29,28 @@ from bosdyn.client.robot_command import (RobotCommandBuilder,
 from bosdyn.client.robot_state import RobotStateClient
 from scipy.spatial.transform import Rotation as R
 
-##### Boundaries of the environment #####
-MINX = -1.8
-MAXX = 1.8
-MINY = -1.4
-MAXY = 1.4
-##### Spot parameters #####
-MAX_SPEED = 1.6                     # Maximum linear velocity of the robot (m/s)
-MAX_ANGULAR_SPEED = 1.5             # Maximum angular velocity of the robot (rad/s)
+@dataclass
+class SpotEnvironmentConfig(yaml.YAMLObject):
+    yaml_tag=u'!SpotEnvironmentConfig'
+    # robot hostname
+    hostname: str
+    # Boundaries of the environment
+    min_x: float
+    max_x: float
+    min_y: float
+    max_y: float
+    # Starting pose of the robot relative to the environment initialization pose
+    start_x: float
+    start_y: float
+    start_angle: float
+
+    def __post_init__(self):
+        assert self.min_x < self.max_x, "min_x must be less than max_x"
+        assert self.min_y < self.max_y, "min_y must be less than max_y"
+        assert self.start_x >= self.min_x and self.start_x <= self.max_x, "start_x must be within the environment boundaries"
+        assert self.start_y >= self.min_y and self.start_y <= self.max_y, "start_y must be within the environment boundaries"
+
+##### Fixed environment parameters #####
 MARGIN = 0.16                       # Margin to the walls within which the robot is stopped (m)
 CHECK_TIMEOUT = MARGIN / MAX_SPEED  # Maximum time the boundary check will wait for state reading (s)
 STAND_TIMEOUT = 10.0                # Maximum time to wait for the robot to stand up (s)
@@ -301,9 +316,9 @@ class SpotGymStateMachine(SpotGymBase):
     """
     Assumes only one thread is calling issue command and reset.
     """
-    def __init__(self, monitor_freq=30.):
-        super().__init__()
+    def __init__(self, config: SpotEnvironmentConfig, monitor_freq=30.):
         assert 1/monitor_freq > EXPECTED_STATE_READ_TIME, "monitor_freq is too high"
+        super().__init__()
         self.__state = State.SHUTDOWN
         self.__main = threading.Thread(target=self.__main_loop)
         self.__cmd_thread = threading.Thread(target=self.__cmd_loop)
@@ -320,6 +335,10 @@ class SpotGymStateMachine(SpotGymBase):
         self.__current_cmd = None
         self.__isopen = False
         self.__freq = monitor_freq
+        self.__body_start_frame = None
+        self.__reset_pose = None
+        self.config = config
+        self.initialize_robot(config.hostname)
     
     @property
     def isopen(self):
@@ -341,8 +360,11 @@ class SpotGymStateMachine(SpotGymBase):
         assert state is not None
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
         theta = R.from_quat([qx, qy, qz, qw]).as_euler('xyz')[2]
-        self._startpos = (x, y, theta)
-        self.logger.info("Start position: {}".format(self._startpos))
+        self.__body_start_frame = Frame2D(x, y, theta)
+        reset_point = self.__body_start_frame.inverse(np.array([ self.config.start_x, self.config.start_y ]))
+        reset_angle = self.__body_start_frame.angle + self.config.start_angle
+        self.__reset_pose = (reset_point[0], reset_point[1], reset_angle)
+        self.logger.info("Start position: {}".format(self.__body_start_frame))
         self.__cmd_event.clear()
         self.__reset_event.clear()
         self.__stop_event.clear()
@@ -355,6 +377,10 @@ class SpotGymStateMachine(SpotGymBase):
         self.__shutdown_thread.start()
         self.__main.start()
         self.__isopen = True
+    
+    @property
+    def body_start_frame(self):
+        return self.__body_start_frame
     
     def wait_threads(self):
         self.__main.join()
@@ -427,7 +453,7 @@ class SpotGymStateMachine(SpotGymBase):
         try:
             self.__reset_event.wait()
             while self.__state != State.SHUTDOWN:
-                result = self._issue_goal_pose_command(*self._startpos)
+                result = self._issue_goal_pose_command(*self.__reset_pose) 
                 self.__reset_event.clear()
                 self.__queue.put(StateMachineRequest(StateMachineAction.RESET_DONE, result))
                 self.__reset_event.wait()
@@ -490,19 +516,20 @@ class SpotGymStateMachine(SpotGymBase):
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
         angle = R.from_quat([qx, qy, qz, qw]).as_euler("xyz", degrees=False)[2]
         box = get_hitbox(x, y, angle)
-        box = change_frame_2d(box, self._startpos[:2], self._startpos[2], degrees=False)
+        box = self.body_start_frame.transform(box)
         min_x, min_y = np.min(box, axis=0)
         max_x, max_y = np.max(box, axis=0)
-        return min_x > MINX + MARGIN and max_x < MAXX - MARGIN and min_y > MINY + MARGIN and max_y < MAXY - MARGIN
+        return min_x > self.config.min_x + MARGIN and max_x < self.config.max_x - MARGIN and \
+                min_y > self.config.min_y + MARGIN and max_y < self.config.max_y - MARGIN
     
     def __bounds_srv(self): 
         try:
             self.__check_bounds.wait()
             while self.__state not in {State.SHUTDOWN, State.SHUTTING_DOWN}:
-                new_state = self._read_robot_state(timeout = CHECK_TIMEOUT - 1/self.__freq)
+                new_state = self._read_robot_state(timeout = CHECK_TIMEOUT - 1/self.__freq + EXPECTED_STATE_READ_TIME)
                 self.__check_bounds.clear()
                 if new_state is None:
-                    self.logger.debug('Bounds srv: timed out')
+                    self.logger.info('Bounds srv: timed out')
                     self.__queue.put(StateMachineRequest(StateMachineAction.CHECK_DONE, None))
                 elif not self.is_in_bounds(new_state):
                     self.__queue.put(StateMachineRequest(StateMachineAction.CHECK_DONE, False))
@@ -524,9 +551,9 @@ class SpotGymStateMachine(SpotGymBase):
                 wait = MAX_MAIN_WAIT
                 if self.state in {State.RUNNING, State.READY} and not check_ongoing:
                     if last_read is not None:
-                        wait = max(0, 1/self.__freq - (time.time() - last_read))
+                        wait = max(0, 1/self.__freq - (time.time() - last_read) - EXPECTED_STATE_READ_TIME)
                     else:
-                        wait = 1/self.__freq
+                        wait = 1/self.__freq - EXPECTED_STATE_READ_TIME
                     if wait <= 0:
                         self.__check_bounds.set()
                         check_ongoing = True
@@ -553,7 +580,7 @@ class SpotGymStateMachine(SpotGymBase):
                         latest_order = None
                         if new_state is None or oob: # next state could not be read or out of bounds
                             if oob:
-                                self.logger.info(f"Robot out of bounds after step. state {new_state.pose_of_body_in_vision}. origin {self._startpos}. Stopping.")
+                                self.logger.info(f"Robot out of bounds after step. state {new_state.pose_of_body_in_vision}. origin {self.__body_start_frame}. Stopping.")
                             else:
                                 self.logger.info("Robot state could not be read after step. Stopping.")
                             self.__state = State.STOPPING

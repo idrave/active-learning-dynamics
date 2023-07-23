@@ -6,7 +6,7 @@ from alrd.environment.spot.robot_state import SpotState, JOINT_NAMES, KinematicS
 from alrd.environment.spot.command import Command, CommandEnum
 from typing import List, Tuple
 from dataclasses import dataclass, field, asdict
-from mbse.utils.replay_buffer import Transition, BaseBuffer
+from mbse.utils.replay_buffer import Transition, BaseBuffer, EpisodicReplayBuffer
 import numpy as np
 import textwrap
 
@@ -120,8 +120,8 @@ class Session(BaseBuffer):
         start = sum(self.episode_lengths[:i])
         end = start + self.episode_lengths[i]
         if self.only_kinematic:
-            states = [SpotState(kinematic_state=KinematicState.fromarray(obs)) for obs in self.obs[start:end]]
-            states.append(SpotState(kinematic_state=KinematicState.fromarray(self.next_obs[end-1])))
+            states = [SpotState(kinematic_state=KinematicState.fromarray(obs), manipulator_state=None) for obs in self.obs[start:end]]
+            states.append(SpotState(kinematic_state=KinematicState.fromarray(self.next_obs[end-1]), manipulator_state=None))
         else:
             states = [SpotState.fromarray(obs) for obs in self.obs[start:end]]
             states.append(SpotState.fromarray(self.next_obs[end-1]))
@@ -143,3 +143,19 @@ class Session(BaseBuffer):
     def __len__(self):
         return len(self.episode_lengths)
 
+def get_episodic_buffer(session: Session):
+    buffer = EpisodicReplayBuffer(
+        obs_shape=session.obs_shape,
+        action_shape=session.action_shape,
+        max_size=session.max_size)
+    for i in range(len(session)):
+        start = sum(session.episode_lengths[:i])
+        end = start + session.episode_lengths[i]
+        buffer.add(Transition(
+            obs=session.obs[start:end],
+            action=session.action[start:end],
+            next_obs=session.next_obs[start:end],
+            reward=session.reward[start:end],
+            done=session.done[start:end]
+        ))
+    return buffer

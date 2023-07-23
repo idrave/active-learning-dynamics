@@ -13,6 +13,7 @@ from alrd.environment.maze import (MazeEnv, MazeGoalEnv, MazeGoalKinemEnv,
                                    create_maze_env)
 from alrd.environment.spot.record import Episode, Session
 from alrd.environment.spot.robot_state import KinematicState
+from alrd.environment.spot.spot import SpotEnvironmentConfig
 from alrd.environment.spot.spot2d import (Spot2DEnv, Spot2DReward,
                                           change_spot2d_obs_frame)
 from alrd.environment.spot.spotgym import SpotGym
@@ -24,7 +25,7 @@ from alrd.environment.wrappers import (CosSinObsWrapper,
                                        RepeatActionWrapper)
 from jax import vmap
 
-from mbse.utils.replay_buffer import EpisodicReplayBuffer
+from mbse.utils.replay_buffer import EpisodicReplayBuffer, Transition
 
 __all__ = ['BaseRobomasterEnv', 'RobomasterEnv', 'create_maze_env', 'MazeEnv', 'init_robot', 'MazeGoalEnv', 'PositionControlEnv', 'SpotGym']
 GOAL = (2.5, 1.8)
@@ -95,7 +96,7 @@ def create_robomaster_env(
     return env
 
 def create_spot_env(
-        hostname: str,
+        config: SpotEnvironmentConfig,
         cmd_freq: float,
         monitor_freq: float = 30,
         log_dir: str | Path | None = None,
@@ -103,8 +104,7 @@ def create_spot_env(
     """
     Creates and initializes spot environment.
     """
-    env = Spot2DEnv(cmd_freq, monitor_freq, log_dir=log_dir)
-    env.initialize_robot(hostname)
+    env = Spot2DEnv(config, cmd_freq, monitor_freq, log_dir=log_dir)
     if query_goal:
         env = QueryGoalWrapper(env)
     return env
@@ -113,7 +113,9 @@ def load_episodic_dataset(
         buffer_path: str,
         usepast: Optional[int] = None,
         usepastact: bool = False,
-        goal = None
+        goal = None,
+        action_cost: float = 0.0,
+        action_normalize: bool = False,
         ):
     """
     Parameters
@@ -121,6 +123,8 @@ def load_episodic_dataset(
         usepast: number of past observations to include in sampled observation
         usepastact: whether to include past actions in sampled observation
         goal: goal position (x, y)
+        action_cost: action cost used to compute reward when goal is specified
+        action_normalize: whether to normalize actions
     """
     data = pickle.load(open(buffer_path, 'rb'))
     obs_shape = (7,)
@@ -132,14 +136,14 @@ def load_episodic_dataset(
         obs_shape=obs_shape,
         action_shape=action_shape,
         normalize=True,
-        action_normalize=True,
+        action_normalize=action_normalize,
         learn_deltas=True,
         use_history=usepast,
         use_action_history=usepastact,
         hide_in_obs=hide_in_obs
     )
     if goal is not None:
-        reward_model = Spot2DReward()
+        reward_model = Spot2DReward(action_cost=action_cost)
         reward_fn = vmap(reward_model.predict)
     for i in range(data.num_episodes):
         tran = data.get_episode(i)
@@ -150,3 +154,21 @@ def load_episodic_dataset(
         buffer.add(tran)
 
     return buffer
+
+def add_2d_zero_samples(buffer: EpisodicReplayBuffer, num_samples: int):
+    """
+    Adds zero samples to buffer.
+    """
+    action_shape = (3,)
+    pose = np.random.uniform(low=[buffer.obs[:,0].min(), buffer.obs[:,1].min(), -np.pi],
+                             high=[buffer.obs[:,0].max(), buffer.obs[:,1].max(), np.pi], size=(num_samples, 3))
+    obs = np.hstack([pose[:,:2], np.cos(pose[:,[2]]), np.sin(pose[:,[2]]), np.zeros((num_samples, 3))])
+    buffer.add(
+        Transition(
+            obs=obs,
+            action=np.zeros((num_samples, *action_shape)),
+            next_obs=obs,
+            reward=np.zeros((num_samples, 1)),
+            done=np.zeros((num_samples, 1)),
+        )
+    )

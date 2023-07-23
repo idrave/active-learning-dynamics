@@ -7,6 +7,7 @@ from alrd.environment.spot.command import Command, CommandEnum
 from alrd.environment.spot.arm_command import ARM_MAX_LINEAR_VELOCITY
 from alrd.environment.spot.record import Session
 from alrd.environment.spot.robot_state import SpotState
+from alrd.environment.spot.spot import SpotEnvironmentConfig
 from alrd.environment.spot.spotgym import SpotGym
 from pathlib import Path
 
@@ -21,9 +22,9 @@ MAX_VERTICAL_VEL = ARM_MAX_LINEAR_VELOCITY
 MAX_AZIMUTHAL_VEL = np.pi / 4
 
 class ArmEnv(SpotGym):
-    def __init__(self, cmd_freq: float, monitor_freq: float = 30, log_dir: str | Path | None = None):
+    def __init__(self, config: SpotEnvironmentConfig, cmd_freq: float, monitor_freq: float = 30, log_dir: str | Path | None = None):
         session = Session(only_kinematic=False, cmd_type=CommandEnum.ARM_CYLINDRICAL)
-        super().__init__(cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=False)
+        super().__init__(config, cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=False)
         self.observation_space = spaces.Box(
             low=np.array([MIN_RADIAL_POS, MIN_AZIMUTHAL, MIN_HEIGHT, -MAX_RADIAL_VEL, -MAX_AZIMUTHAL_VEL, -MAX_VERTICAL_VEL]),
             high=np.array([MAX_RADIAL_POS, MAX_AZIMUTHAL, MAX_HEIGHT, MAX_RADIAL_VEL, MAX_AZIMUTHAL_VEL, MAX_VERTICAL_VEL]))

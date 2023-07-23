@@ -5,9 +5,11 @@ import textwrap
 from enum import Enum
 from typing import Tuple
 
-DIST_TO_FRONT = 0.55
-SPOT_LENGTH = 1.1
-SPOT_WIDTH = 0.5
+MAX_SPEED = 1.6         # Maximum linear velocity of the robot (m/s)
+MAX_ANGULAR_SPEED = 1.5 # Maximum angular velocity of the robot (rad/s)
+DIST_TO_FRONT = 0.55    # Distance from body frame origin to front of the robot (m)
+SPOT_LENGTH = 1.1       # Length of the robot from rear to front (m)            
+SPOT_WIDTH = 0.5        # Width of the robot from left to right side (m)
 
 def get_front_coord(x: float, y: float, cos: float, sin: float) -> Tuple[float, float]:
     return x + cos * DIST_TO_FRONT, y + sin * DIST_TO_FRONT

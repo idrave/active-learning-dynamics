@@ -2,31 +2,35 @@
 import logging
 
 from alrd.environment.spot.spotgym import SpotGym
+
 logging.basicConfig(level=logging.INFO)
+import argparse
+import json
+import logging
+import pickle
+import signal
+import time
 ###
 import traceback
-from gym.wrappers.time_limit import TimeLimit
-from gym.wrappers.rescale_action import RescaleAction
-import numpy as np
-import time
-from alrd.utils import get_timestamp_str, convert_to_cos_sin
-from alrd.environment import BaseRobomasterEnv, create_robomaster_env, create_spot_env
-from alrd.environment.maze import MazeGoalVelocityEnv, MazeGoalPositionEnv
-from alrd.agent import Agent, RandomGPAgent, KeyboardAgent, AgentType, create_spot_agent, SpotAgentEnum
-from alrd.agent.repeat import RepeatAgent
-from alrd.environment.filter import KalmanFilter
-import json
-import pickle
 from pathlib import Path
-import logging
-import signal
-from mbse.utils.replay_buffer import ReplayBuffer, Transition, EpisodicReplayBuffer
-import argparse
-import yaml
-import jax
-from alrd.environment.wrappers import CosSinObsWrapper, RemoveAngleActionWrapper, KeepObsWrapper, RepeatActionWrapper, GlobalFrameActionWrapper
-import tqdm
 from typing import Union
+
+import jax
+import numpy as np
+import tqdm
+import yaml
+from alrd.agent import (Agent, AgentType, 
+                        SpotAgentEnum, create_spot_agent)
+from alrd.agent.repeat import RepeatAgent
+from alrd.environment import (BaseRobomasterEnv, create_robomaster_env,
+                              create_spot_env)
+from alrd.environment.filter import KalmanFilter
+from alrd.utils import get_timestamp_str
+from gym.wrappers.rescale_action import RescaleAction
+from gym.wrappers.time_limit import TimeLimit
+
+from mbse.utils.replay_buffer import (EpisodicReplayBuffer, ReplayBuffer,
+                                      Transition)
 
 logger = logging.getLogger(__file__)
 
@@ -119,11 +123,12 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
     env.reset()
 
 def add_common_args(main_parser: argparse.ArgumentParser):
-    main_parser.add_argument('--tag', type=str, default='')
+    main_parser.add_argument('--tag', type=str, default='data')
     main_parser.add_argument('--tqdm', action='store_true')
     main_parser.add_argument('-n', '--n_steps', default=100000, type=int, help='Number of steps to record')
     main_parser.add_argument('-e', '--episode_len', default=None, type=int, help='Maximum episode length')
     main_parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency at which commands are supplied to the environment')
+    main_parser.add_argument('-o', '--output', default='output', type=str, help='Output directory')
     main_parser.add_argument('--noactnorm', action='store_true', help='Set action normalization to False in replay buffer')
     main_parser.add_argument('--seed', default=0, type=int, help='Randomization seed')
 
@@ -155,16 +160,16 @@ def add_robomaster_parser(parser: argparse.ArgumentParser):
 
 def add_spot_parser(parser: argparse.ArgumentParser):
     add_common_args(parser)
-    parser.add_argument('hostname', type=str, help='Hostname of the spot robot')
-    parser.add_argument('--monitor', type=int, default=30, help='Frequency at which the environment checks if the robot is within boundaries')
+    parser.add_argument('config', type=str, help='Environment configuration file')
+    parser.add_argument('--monitor', type=int, default=30, help='Frequency at which the environment checks if the robot is within boundaries (default: 30))')
     parser.add_argument('-a', '--agent', default=SpotAgentEnum.KEYBOARD.value, type=str, help='Agent to use', choices=[a.value for a in SpotAgentEnum])
     parser.add_argument('--smoothing', default=None, type=float, help='Smoothing factor for the actions')
     parser.add_argument('--optimizer_checkpoint', default=None, type=str, help='Path to optimizer checkpoint')
     parser.add_argument('--query_goal', action='store_true', help='Whether to query the goal from the user at every reset')
 
 def collect_data(args):
-    output_dir = Path('output')/'data'/('%s-%s'%(args.tag,get_timestamp_str()))
-    output_dir.mkdir()
+    output_dir = Path(args.output)/('%s-%s'%(args.tag,get_timestamp_str()))
+    output_dir.mkdir(parents=True)
     yaml.dump(vars(args), open(output_dir/'args.yaml', 'w'))
     rng = jax.random.PRNGKey(args.seed)
     if args.robot == 'robomaster':
@@ -198,8 +203,9 @@ def collect_data(args):
         )
     elif args.robot == 'spot':
         agent_type=SpotAgentEnum(args.agent)
+        config = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
         env = create_spot_env(
-            hostname=args.hostname,
+            config=config,
             cmd_freq=args.freq,
             monitor_freq=args.monitor,
             log_dir=output_dir,
