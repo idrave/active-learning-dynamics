@@ -33,7 +33,7 @@ def get_2d_buffer(session: Session) -> EpisodicReplayBuffer:
         episode = session.get_episode(i)
         x, y, _, qx, qy, qz, qw = episode.obs[0].pose_of_body_in_vision # TODO assumes it starts in the origin, could be different
         angle = R.from_quat([qx, qy, qz, qw]).as_euler("xyz", degrees=False)[2]
-        obs = np.array([Spot2DEnv.get_obs_from_state_goal(state, np.array([x, y]), angle) for state in episode.obs])
+        obs = np.array([Spot2DEnv.get_obs_from_state_goal(state, np.array([x, y, angle])) for state in episode.obs])
         action = np.array([Spot2DEnv.get_action_from_command(cmd) for cmd in episode.actions])
         tran = Transition(
             obs=obs[:-1],

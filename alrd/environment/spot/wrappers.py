@@ -18,7 +18,8 @@ class QueryGoalWrapper(Wrapper):
     def reset(self, seed: int | None = None, options: dict | None = None):
         x = input('Enter goal x: ')
         y = input('Enter goal y: ')
+        angle = input('Enter goal angle: ')
         if options is None:
             options = {}
-        options['goal'] = np.array([float(x), float(y)])
+        options['goal'] = np.array([float(x), float(y), float(angle)])
         return self.env.reset(seed=seed, options=options)

@@ -72,6 +72,15 @@ class Frame2D:
     def transform(self, vector):
         return change_frame_2d(vector, (self.x, self.y), self.angle, degrees=False)
     
+    def transform_pose(self, x, y, angle):
+        x, y = change_frame_2d(np.array([x,y]), (self.x, self.y), self.angle, degrees=False)
+        angle -= self.angle
+        if angle > np.pi:
+            angle -= 2 * np.pi
+        elif angle < -np.pi:
+            angle += 2 * np.pi
+        return x, y, angle
+    
     def inverse(self, vector):
         return change_frame_2d(vector, self.__inverse, -self.angle, degrees=False)
     

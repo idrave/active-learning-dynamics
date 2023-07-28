@@ -16,6 +16,7 @@ import bosdyn.client.util
 import numpy as np
 from alrd.environment.spot.command import Command 
 from alrd.environment.spot.robot_state import SpotState
+from alrd.environment.spot.state_service import StateService
 from alrd.environment.spot.utils import MAX_SPEED, get_hitbox
 from alrd.utils import change_frame_2d, Frame2D
 from bosdyn.api import estop_pb2
@@ -51,10 +52,12 @@ class SpotEnvironmentConfig(yaml.YAMLObject):
         assert self.start_y >= self.min_y and self.start_y <= self.max_y, "start_y must be within the environment boundaries"
 
 ##### Fixed environment parameters #####
-MARGIN = 0.16                       # Margin to the walls within which the robot is stopped (m)
+MARGIN = 0.20                       # Margin to the walls within which the robot is stopped (m)
 CHECK_TIMEOUT = MARGIN / MAX_SPEED  # Maximum time the boundary check will wait for state reading (s)
 STAND_TIMEOUT = 10.0                # Maximum time to wait for the robot to stand up (s)
 POSE_TIMEOUT = 10.0                 # Maximum time to wait for the robot to reach a pose (s)
+RESET_SLEEP_TIME = 0.02             # Time to sleep between reset attempts (s)
+STOP_SLEEP_TIME = 0.02              # Time to sleep between stop attempts (s)
 SHUTDOWN_TIMEOUT = 10.0             # Maximum time to wait for the robot to shut down (s)
 READ_STATE_SLEEP_PERIOD = 0.01      # Period defining how often we check if a state read request is finished (s)
 EXPECTED_STATE_READ_TIME = 0.02     # Expected time for the robot to read its state (s)
@@ -107,12 +110,14 @@ class SpotGymBase(object):
         self.lease_client = self.robot.ensure_client(LeaseClient.default_service_name)
         self.estop_client = self.robot.ensure_client(EstopClient.default_service_name)
         self.robot_state_client = self.robot.ensure_client(RobotStateClient.default_service_name)
+        self.robot_state_server = StateService(self.robot_state_client)
 
     def _start(self):
         if self.estop_keepalive is None:
             self._toggle_estop()
         self._gain_control()
         self._power_motors()
+        self.robot_state_server.start()
 
     def _shutdown(self):
         """Returns lease to power off.
@@ -123,7 +128,7 @@ class SpotGymBase(object):
         not self.robot.is_powered_on():
             self.logger.info("Robot is already off!")
             return
-
+        self.robot_state_server.close()
         blocking_sit(self.command_client, timeout_sec=SHUTDOWN_TIMEOUT, update_frequency=10.)
         self.robot.power_off(cut_immediately=False, timeout_sec=SHUTDOWN_TIMEOUT)
         self.motors_powered = False
@@ -202,32 +207,64 @@ class SpotGymBase(object):
 
         self.command_client.robot_command_async(command.cmd, end_time_secs=endtime)
     
-    def _issue_blocking_stand_command(self) -> bool:
-        try:
-            blocking_stand(self.command_client, timeout_sec=STAND_TIMEOUT, update_frequency=0.1)
-            return True
-        except Exception as e:
-            self.logger.error("Failed to stand robot:")
-            traceback.print_exc()
-            return False
+    def _issue_blocking_stand_command(self, timeout=STAND_TIMEOUT) -> bool:
+        current = time.time()
+        endtime = current + timeout
+        done = False
+        while not done and endtime > current:
+            try:
+                blocking_stand(self.command_client, timeout_sec=endtime-current, update_frequency=STOP_SLEEP_TIME)
+                done = True
+            except Exception as e:
+                self.logger.warning('Error stopping robot:\n'+traceback.format_exc())
+            if not done and endtime > time.time():
+                time.sleep(STOP_SLEEP_TIME)
+            else:
+                break
+            current = time.time()
+        return done
 
-    def _issue_goal_pose_command(self, x, y, theta) -> bool:
+    def _issue_goal_pose_command(self, x, y, theta, timeout=POSE_TIMEOUT) -> bool:
         cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
             goal_x=x, goal_y=y, goal_heading=theta, frame_name=frame_helpers.VISION_FRAME_NAME
         )
-        cmd_id = self.command_client.robot_command_async(cmd, end_time_secs=time.time()+POSE_TIMEOUT).result() 
-        return block_for_trajectory_cmd(self.command_client, cmd_id, timeout_sec=POSE_TIMEOUT)
+        current = time.time()
+        endtime = current + timeout
+        done = False
+        while not done and endtime > current:
+            try:
+                cmd_id = self.command_client.robot_command_async(cmd, end_time_secs=endtime).result() 
+                done = block_for_trajectory_cmd(self.command_client, cmd_id, timeout_sec=endtime - time.time())
+            except:
+                self.logger.warning('Error resetting robot:\n'+traceback.format_exc())
+            if not done and endtime > time.time():
+                time.sleep(RESET_SLEEP_TIME)
+            else:
+                break
+            current = time.time()
+        return done
 
     def _read_robot_state(self, timeout=None) -> Optional[SpotState]:
-        # Here we wait till the future is done (Method: Check-until-done) or timeout passes.
-        check_until_done_future = self.robot_state_client.get_robot_state_async()
-        start = time.time()
-        while not check_until_done_future.done() and (timeout is None or time.time() - start < timeout):
-            time.sleep(READ_STATE_SLEEP_PERIOD)
-        if check_until_done_future.done():
-            return SpotState.from_robot_state(time.time(), check_until_done_future.result())
-        else:
-            return None
+        if timeout is not None:
+            current = time.time()
+            endtime = current + timeout
+        state = None
+        while state is None and (timeout is None or endtime > current):
+            try:
+                # Here we wait till the future is done (Method: Check-until-done) or timeout passes.
+                check_until_done_future = self.robot_state_client.get_robot_state_async()
+                while not check_until_done_future.done() and (timeout is None or endtime > time.time()):
+                    time.sleep(READ_STATE_SLEEP_PERIOD)
+                if check_until_done_future.done():
+                    state = SpotState.from_robot_state(time.time(), check_until_done_future.result())
+            except:
+                self.logger.warning('Error reading state:\n'+traceback.format_exc())
+            if state is None and endtime > time.time():
+                time.sleep(READ_STATE_SLEEP_PERIOD)
+            else:
+                break
+            current = time.time()
+        return state
 
     def _print_status(self):
         """Prints the current status of the robot: E-Stop, Control, Powered-on, Current Mode.
@@ -404,6 +441,12 @@ class SpotGymStateMachine(SpotGymBase):
         if not self.isopen:
             return
         if self.state != State.SHUTDOWN:
+            try:
+                self._issue_stop()
+                self._issue_goal_pose_command(self.body_start_frame.x, self.body_start_frame.y, self.body_start_frame.angle) # TODO add this to main loop somehow
+            except:
+                self.logger.error('Failed to reset robot position before shutdown')
+                pass # TODO do this properly
             success, _ = self._issue_shutdown()
             if not success:
                 self.logger.error("Failed to shutdown robot.")
@@ -437,29 +480,26 @@ class SpotGymStateMachine(SpotGymBase):
                 self.__queue.put(StateMachineRequest(StateMachineAction.STEP_DONE, (new_state, read_time, oob)))
                 self.__cmd_event.wait()
         except Exception as e:
-            self.logger.error("Error in command loop")
-            traceback.print_exc()
+            self.logger.error("Error in command loop:\n"+traceback.format_exc())
             self._issue_shutdown()
 
     def _issue_command(self, cmd: Command, timelength: float) -> Tuple[bool, Optional[Tuple[Optional[SpotState], Optional[float], bool]]]:
         request = StateMachineRequest(StateMachineAction.STEP, (cmd, timelength))
         self.__queue.put(request)
         response = request.wait()
-        if response is None:
-            return False, None
         return response
     
     def __reset_loop(self):
         try:
             self.__reset_event.wait()
             while self.__state != State.SHUTDOWN:
-                result = self._issue_goal_pose_command(*self.__reset_pose) 
+                self.logger.debug("Reset loop: Resetting robot...")
+                done = self._issue_goal_pose_command(*self.__reset_pose, timeout=POSE_TIMEOUT) 
                 self.__reset_event.clear()
-                self.__queue.put(StateMachineRequest(StateMachineAction.RESET_DONE, result))
+                self.__queue.put(StateMachineRequest(StateMachineAction.RESET_DONE, done))
                 self.__reset_event.wait()
         except Exception as e:
-            self.logger.error("Error in reset loop:")
-            traceback.print_exc()
+            self.logger.error("Error in reset loop:\n"+traceback.format_exc())
             self._issue_shutdown()
     
     def _issue_reset(self) -> Tuple[bool, None]:
@@ -474,13 +514,12 @@ class SpotGymStateMachine(SpotGymBase):
         try:
             self.__stop_event.wait()
             while self.__state != State.SHUTDOWN:
-                result = self._issue_blocking_stand_command()
+                done = self._issue_blocking_stand_command(timeout=STAND_TIMEOUT)
                 self.__stop_event.clear()
-                self.__queue.put(StateMachineRequest(StateMachineAction.STOP_DONE, result))
+                self.__queue.put(StateMachineRequest(StateMachineAction.STOP_DONE, done))
                 self.__stop_event.wait()
         except Exception as e:
-            self.logger.error("Error in stop loop:")
-            traceback.print_exc()
+            self.logger.error("Error in stop loop:\n"+traceback.format_exc())
             self._issue_shutdown()
     
     def _issue_stop(self) -> bool:
@@ -501,8 +540,7 @@ class SpotGymStateMachine(SpotGymBase):
                 self.__queue.put(StateMachineRequest(StateMachineAction.SHUTDOWN_DONE, True))
                 self.__shutdown_event.wait()
         except Exception as e:
-            self.logger.error("Error in shutdown loop:")
-            traceback.print_exc()
+            self.logger.error("Error in shutdown loop:\n"+traceback.format_exc())
             self.__state = State.SHUTDOWN
             self._shutdown()
 
@@ -532,6 +570,7 @@ class SpotGymStateMachine(SpotGymBase):
                     self.logger.info('Bounds srv: timed out')
                     self.__queue.put(StateMachineRequest(StateMachineAction.CHECK_DONE, None))
                 elif not self.is_in_bounds(new_state):
+                    self.logger.info(f"Robot out of bounds. state {new_state.pose_of_body_in_vision}. origin {self.__body_start_frame}. Stopping.")
                     self.__queue.put(StateMachineRequest(StateMachineAction.CHECK_DONE, False))
                 else:
                     self.__queue.put(StateMachineRequest(StateMachineAction.CHECK_DONE, True))
@@ -668,6 +707,7 @@ class SpotGymStateMachine(SpotGymBase):
                 elif request.action == StateMachineAction.SHUTDOWN:
                     if self.__state != State.SHUTTING_DOWN:
                         self.__state = State.SHUTTING_DOWN
+                        self.logger.info('Main loop shutting down robot')
                         self.__shutdown_event.set()
                         if latest_order is not None:
                             latest_order.set_feedback((False, None))
@@ -681,8 +721,7 @@ class SpotGymStateMachine(SpotGymBase):
                 else:
                     raise ValueError("Invalid action {}".format(request.action))
         except Exception as e:
-            self.logger.error("Error in main loop")
-            traceback.print_exc()
+            self.logger.error("Error in main loop:\n"+traceback.format_exc())
             if latest_order is not None:
                 latest_order.set_feedback((False, None))
             self.__state = State.SHUTDOWN

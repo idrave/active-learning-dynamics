@@ -25,6 +25,7 @@ from alrd.agent.repeat import RepeatAgent
 from alrd.environment import (BaseRobomasterEnv, create_robomaster_env,
                               create_spot_env)
 from alrd.environment.filter import KalmanFilter
+from alrd.environment.spot.spotgym import ResetEnum
 from alrd.utils import get_timestamp_str
 from gym.wrappers.rescale_action import RescaleAction
 from gym.wrappers.time_limit import TimeLimit
@@ -69,22 +70,28 @@ def init_filter(freq, use_acc):
                             use_acc=False, pred_displ=True)
 
 def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], buffer, truncated_vec, info_list, max_steps,
-                        buffer_size, use_tqdm):
+                        num_steps, num_episodes, avoid_pose_reset, use_tqdm):
     num_points = max_steps
     obs_space =  env.observation_space.shape
     action_space =  env.action_space.shape
     started = False
-    it = range(buffer_size)
+    episode_count = 0
+    step = 0
     if use_tqdm:
-        it = tqdm.tqdm(it)
-    for step in it:
+        if num_steps is not None:
+            pbar = tqdm.tqdm(total=num_steps)
+        else:
+            pbar = tqdm.tqdm(total=num_episodes)
+    while (num_episodes is None or episode_count < num_episodes) and (num_steps is None or step < num_steps):
         if not started:
             count = 0
-            obs, info = env.reset()
+            options = {}
+            if avoid_pose_reset:
+                options['action'] = ResetEnum.STAND
+            obs, info = env.reset(options=options)
             if obs is None:
                 logger.info("Reset returned None state. Stopping collection.")
-                env.stop_robot()
-                break
+                return
             agent.reset()
             start = time.time()
             info_list.append(info)
@@ -94,30 +101,41 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
             next_obs_vec = np.zeros((num_points,) + obs_space)
             done_vec = np.zeros((num_points,))
             started = True
+        agent_start = time.time()
         action = agent.act(obs)
-        next_obs, reward, terminated, truncated, info = env.step(action)
-        if next_obs is not None:
-            obs_vec[count] = obs
-            action_vec[count] = action
-            reward_vec[count] = reward
-            next_obs_vec[count] = next_obs
-            done_vec[count] = terminated
-            truncated_vec[step] = truncated
-            info_list.append(info)
-            count += 1
-        if terminated or truncated or step == buffer_size - 1:
-            transitions = Transition(
-                obs=obs_vec[:count],
-                action=action_vec[:count],
-                reward=reward_vec[:count],
-                next_obs=next_obs_vec[:count],
-                done=done_vec[:count],
-            )
-            buffer.add(transitions)
-            env.stop_robot()
+        agent_time = time.time() - agent_start
+        if action is not None:
+            next_obs, reward, terminated, truncated, info = env.step(action)
+            if next_obs is not None:
+                obs_vec[count] = obs
+                action_vec[count] = action
+                reward_vec[count] = reward
+                next_obs_vec[count] = next_obs
+                done_vec[count] = terminated
+                truncated_vec[step] = truncated
+                info['agent_time'] = agent_time
+                info_list.append(info)
+                count += 1
+                step += 1
+                if use_tqdm and num_steps is not None:
+                    pbar.update(1)
+        if action is None or terminated or truncated or step == num_steps:
+            #env.stop_robot()
             started = False
-            print('Terminated %s. Truncated %s' % (terminated, truncated))
-            print('Episode length %d. Elapsed time %f. Average step time %f' % (count, time.time() - start, (time.time() - start)/count))
+            if count > 0:
+                transitions = Transition(
+                    obs=obs_vec[:count],
+                    action=action_vec[:count],
+                    reward=reward_vec[:count],
+                    next_obs=next_obs_vec[:count],
+                    done=done_vec[:count],
+                )
+                buffer.add(transitions)
+                print('Terminated %s. Truncated %s' % (terminated, truncated))
+                print('Episode length %d. Elapsed time %f. Average step time %f' % (count, time.time() - start, (time.time() - start)/count))
+                episode_count += 1
+                if use_tqdm and num_episodes is not None:
+                    pbar.update(1)
         else:
             obs = next_obs
     env.reset()
@@ -125,7 +143,8 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
 def add_common_args(main_parser: argparse.ArgumentParser):
     main_parser.add_argument('--tag', type=str, default='data')
     main_parser.add_argument('--tqdm', action='store_true')
-    main_parser.add_argument('-n', '--n_steps', default=100000, type=int, help='Number of steps to record')
+    main_parser.add_argument('-n', '--n_steps', default=None, type=int, help='Number of steps to record')
+    main_parser.add_argument('-ne', '--num_episodes', default=None, type=int, help='Number of episodes to record')
     main_parser.add_argument('-e', '--episode_len', default=None, type=int, help='Maximum episode length')
     main_parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency at which commands are supplied to the environment')
     main_parser.add_argument('-o', '--output', default='output', type=str, help='Output directory')
@@ -166,6 +185,7 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     parser.add_argument('--smoothing', default=None, type=float, help='Smoothing factor for the actions')
     parser.add_argument('--optimizer_checkpoint', default=None, type=str, help='Path to optimizer checkpoint')
     parser.add_argument('--query_goal', action='store_true', help='Whether to query the goal from the user at every reset')
+    parser.add_argument('--avoid_pose_reset', action='store_true', help="Whether to reset the robot's pose only when necessary and not at every episode")
 
 def collect_data(args):
     output_dir = Path(args.output)/('%s-%s'%(args.tag,get_timestamp_str()))
@@ -236,11 +256,13 @@ def collect_data(args):
     if max_episode_steps is not None:
         print(max_episode_steps)
         env = TimeLimit(env, max_episode_steps=max_episode_steps)
-    truncated_vec = np.zeros((args.n_steps,))
+    truncated_vec = np.zeros((args.n_steps,)) # TODO need to fix this for when number of episodes is specified
     info_list = []
     try:
         collect_data_buffer(
-            agent, env, buffer, truncated_vec, info_list, max_episode_steps,  args.n_steps, use_tqdm=args.tqdm)
+            agent, env, buffer, truncated_vec, info_list, max_episode_steps, args.n_steps, args.num_episodes, args.avoid_pose_reset, use_tqdm=args.tqdm)
+    except KeyboardInterrupt:
+        print('Collection interrupted!')
     except Exception as e:
         traceback.print_exc()
     finally:
@@ -253,4 +275,6 @@ if __name__ == '__main__':
     add_robomaster_parser(subparsers.add_parser('robomaster'))
     add_spot_parser(subparsers.add_parser('spot'))
     args = parser.parse_args()
+    assert args.n_steps is not None or args.num_episodes is not None, 'Either number of steps or number of episodes must be specified'
+    assert args.n_steps is None or args.num_episodes is None, 'Either number of steps or number of episodes must be specified, not both'
     collect_data(args)

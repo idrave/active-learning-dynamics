@@ -4,6 +4,7 @@ import pickle
 import time
 from pathlib import Path
 from typing import Optional
+from alrd.environment.wrappers.transforms import CosSinObsWrapper, GlobalFrameActionWrapper
 
 import numpy as np
 from alrd.environment.env import (BaseRobomasterEnv, PositionControlEnv,
@@ -18,9 +19,7 @@ from alrd.environment.spot.spot2d import (Spot2DEnv, Spot2DReward,
                                           change_spot2d_obs_frame)
 from alrd.environment.spot.spotgym import SpotGym
 from alrd.environment.spot.wrappers import QueryGoalWrapper
-from alrd.environment.wrappers import (CosSinObsWrapper,
-                                       GlobalFrameActionWrapper,
-                                       KeepObsWrapper,
+from alrd.environment.wrappers.transforms import (KeepObsWrapper,
                                        RemoveAngleActionWrapper,
                                        RepeatActionWrapper)
 from jax import vmap
@@ -115,6 +114,7 @@ def load_episodic_dataset(
         usepastact: bool = False,
         goal = None,
         action_cost: float = 0.0,
+        velocity_cost: float = 0.0,
         action_normalize: bool = False,
         ):
     """
@@ -124,6 +124,7 @@ def load_episodic_dataset(
         usepastact: whether to include past actions in sampled observation
         goal: goal position (x, y)
         action_cost: action cost used to compute reward when goal is specified
+        velocity_cost: velocity cost used to compute reward when goal is specified
         action_normalize: whether to normalize actions
     """
     data = pickle.load(open(buffer_path, 'rb'))
@@ -143,13 +144,13 @@ def load_episodic_dataset(
         hide_in_obs=hide_in_obs
     )
     if goal is not None:
-        reward_model = Spot2DReward(action_cost=action_cost)
+        reward_model = Spot2DReward(action_cost=action_cost, velocity_cost=velocity_cost)
         reward_fn = vmap(reward_model.predict)
     for i in range(data.num_episodes):
         tran = data.get_episode(i)
         if goal is not None:
-            tran.obs[:] = change_spot2d_obs_frame(tran.obs, goal, 0)
-            tran.next_obs[:] = change_spot2d_obs_frame(tran.next_obs, goal, 0)
+            tran.obs[:] = change_spot2d_obs_frame(tran.obs, goal[:2], goal[2])
+            tran.next_obs[:] = change_spot2d_obs_frame(tran.next_obs, goal[:2], goal[2])
             tran.reward[:,0] = reward_fn(tran.next_obs, tran.action)[:]
         buffer.add(tran)
 

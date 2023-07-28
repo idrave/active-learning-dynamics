@@ -8,7 +8,7 @@ from alrd.agent.adapter import AgentAdapter
 from alrd.agent.model_based import ModelBasedAgentAdapter
 from mbse.agents.model_based.model_based_agent import ModelBasedAgent
 from mbse.models.wrappers import ActionSmoothing
-from mbse.agents.model_based.smooth_agent import SmoothAgent
+from mbse.agents.model_based.smooth_agent import SmoothAgent, SmoothActionAgent
 from mbse.optimizers.sac_based_optimizer import SACOptimizer
 from enum import Enum
 import pickle
@@ -72,21 +72,26 @@ def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum
     elif agent_type == SpotAgentEnum.SAC:
         sac_optimizer = cloudpickle.load(open(optimizer_path, 'rb'))
         assert isinstance(sac_optimizer, SACOptimizer)
+        sac_kwargs = {
+            'actor_features': sac_optimizer.agent_list[0].actor.features,
+            'critic_features': sac_optimizer.agent_list[0].critic.features
+        }
         if smoothing_coeff is not None:
-            agent = SmoothAgent(
+            agent = SmoothActionAgent(
                 action_space=action_space,
                 observation_space=observation_space,
                 dynamics_model=sac_optimizer.dynamics_model,
                 smoothing_coeff=smoothing_coeff,
-                smoothing_ind=[4, 5, 6],
-                policy_optimizer_name='SacOpt'
+                policy_optimizer_name='SacOpt',
+                optimizer_kwargs={'sac_kwargs': sac_kwargs}
             )
         else:
             agent = ModelBasedAgent(
                 action_space=action_space,
                 observation_space=observation_space,
                 dynamics_model=sac_optimizer.dynamics_model,
-                policy_optimizer_name='SacOpt'
+                policy_optimizer_name='SacOpt',
+                optimizer_kwargs={'sac_kwargs': sac_kwargs}
             )
         agent.update_optimizer(sac_optimizer)
         return ModelBasedAgentAdapter(agent, rng)
