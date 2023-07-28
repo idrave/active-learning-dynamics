@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import logging
 import time
-from alrd.maze import Maze
+from alrd.environment.robomaster.maze import Maze
 
 logger = logging.getLogger(__name__)
 

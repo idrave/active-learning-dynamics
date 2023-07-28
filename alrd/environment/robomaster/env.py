@@ -1,13 +1,13 @@
 import gym
 from gym import spaces
 from robomaster import robot
-from alrd.subscriber import RobotSubAbs, ChassisSub
+from alrd.environment.robomaster.subscriber import RobotSubAbs, ChassisSub
 import robomaster.robot
 import numpy as np
 import time
 import logging
-from alrd.environment.names import *
-from alrd.utils import rotate_2d_vector, sleep_ms
+from alrd.environment.robomaster.names import *
+from alrd.utils.utils import rotate_2d_vector, sleep_ms
 from abc import ABC, abstractmethod
 import traceback
 

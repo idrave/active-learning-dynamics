@@ -1,7 +1,7 @@
 from mbse.agents.model_based.model_based_agent import ModelBasedAgent
 from alrd.agent.absagent import AgentReset
 import numpy as np
-from alrd.ui import KeyboardListener
+from alrd.utils.keyboard import KeyboardListener
 
 class ModelBasedAgentAdapter(AgentReset):
     def __init__(self, agent: ModelBasedAgent, rng) -> None:

@@ -1,8 +1,8 @@
-from alrd.environment.env import VelocityControlEnv
-from alrd.ui import KeyboardListener
+from alrd.environment.robomaster.env import VelocityControlEnv
+from alrd.utils.keyboard import KeyboardListener
 from alrd.agent.absagent import Agent, AgentReset
 import numpy as np
-from alrd.utils import rotate_2d_vector
+from alrd.utils.utils import rotate_2d_vector
 from typing import Union
 
 class KeyboardAgent(Agent):

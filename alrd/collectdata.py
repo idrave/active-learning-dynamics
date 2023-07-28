@@ -24,9 +24,9 @@ from alrd.agent import (Agent, AgentType,
 from alrd.agent.repeat import RepeatAgent
 from alrd.environment import (BaseRobomasterEnv, create_robomaster_env,
                               create_spot_env)
-from alrd.environment.filter import KalmanFilter
+from alrd.environment.robomaster.filter import KalmanFilter
 from alrd.environment.spot.spotgym import ResetEnum
-from alrd.utils import get_timestamp_str
+from alrd.utils.utils import get_timestamp_str
 from gym.wrappers.rescale_action import RescaleAction
 from gym.wrappers.time_limit import TimeLimit
 

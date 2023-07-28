@@ -1,6 +1,6 @@
-from alrd.maze import Maze
-from alrd.subscriber import RobotSub, MazeMarginChecker, VelocityActionSub, ChassisSub
-from alrd.environment.env import init_robot, BaseRobomasterEnv, VelocityControlEnv, PositionControlEnv, BaseEnvAccel
+from alrd.environment.robomaster.maze import Maze
+from alrd.environment.robomaster.subscriber import RobotSub, MazeMarginChecker, VelocityActionSub, ChassisSub
+from alrd.environment.robomaster.env import init_robot, BaseRobomasterEnv, VelocityControlEnv, PositionControlEnv, BaseEnvAccel
 from mbse.utils.replay_buffer import Transition
 from robomaster.robot import Robot
 from gym import spaces
@@ -10,8 +10,8 @@ import logging
 from mbse.models.reward_model import RewardModel
 import jax
 import jax.numpy as jnp
-from alrd.maze import create_maze
-from alrd.utils import rotate_2d_vector
+from alrd.environment.robomaster.maze import create_maze
+from alrd.utils.utils import rotate_2d_vector
 
 logger = logging.getLogger(__name__)
 

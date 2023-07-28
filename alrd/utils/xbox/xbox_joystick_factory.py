@@ -5,13 +5,13 @@
 # Development Kit License (20191101-BDSDK-SL).
 
 import platform
-from alrd.xbox.xbox_joystick import XboxJoystick
+from alrd.utils.xbox.xbox_joystick import XboxJoystick
 
 if platform.system() == "Windows":
-    from alrd.xbox.xbox_joystick_windows import XboxJoystickWindows
+    from alrd.utils.xbox.xbox_joystick_windows import XboxJoystickWindows
 else:
     import distro
-    from alrd.xbox.xbox_joystick_linux import XboxJoystickLinux
+    from alrd.utils.xbox.xbox_joystick_linux import XboxJoystickLinux
 
 
 class XboxJoystickFactory:

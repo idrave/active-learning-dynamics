@@ -1,4 +1,4 @@
-from alrd.environment.env import VelocityControlEnv
+from alrd.environment.robomaster.env import VelocityControlEnv
 import numpy as np
 
 class LineAgent:

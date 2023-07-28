@@ -15,7 +15,7 @@ from alrd.environment.spot.record import Session, Episode
 from alrd.environment.spot.robot_state import SpotState
 from alrd.environment.spot.spot import (COMMAND_DURATION, CHECK_TIMEOUT,
                                         SpotGymStateMachine, SpotEnvironmentConfig, State)
-from alrd.utils import get_timestamp_str
+from alrd.utils.utils import get_timestamp_str
 
 from enum import Enum
 

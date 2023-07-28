@@ -2,7 +2,7 @@ from shapely import Polygon,LineString, Point, dwithin, is_ccw
 import numpy as np
 from copy import deepcopy
 from scipy.spatial.transform import Rotation 
-from alrd.utils import rotate_2d_vector
+from alrd.utils.utils import rotate_2d_vector
 
 def create_maze(margin=0.3):
     p0 = np.array([-0.65, -0.77])

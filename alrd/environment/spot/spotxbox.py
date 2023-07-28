@@ -9,7 +9,7 @@ import traceback
 from enum import Enum
 from alrd.environment.spot.mobility_command import MobilityCommand
 
-from alrd.xbox.xbox_joystick_factory import XboxJoystickFactory
+from alrd.utils.xbox.xbox_joystick_factory import XboxJoystickFactory
 from alrd.environment.spot.spot import SpotGymBase
 from alrd.environment.spot.orientation_command import OrientationCommand
 
@@ -23,7 +23,7 @@ from bosdyn.client.estop import EstopClient
 from bosdyn.client.lease import LeaseClient, ResourceAlreadyClaimedError
 from bosdyn.client.robot_command import RobotCommandBuilder, RobotCommandClient
 from bosdyn.geometry import EulerZXY
-from alrd.utils import get_timestamp_str
+from alrd.utils.utils import get_timestamp_str
 from pathlib import Path
 
 

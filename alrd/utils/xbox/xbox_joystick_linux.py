@@ -19,7 +19,7 @@ import subprocess
 import select
 import time
 
-from alrd.xbox.xbox_joystick import XboxJoystick
+from alrd.utils.xbox.xbox_joystick import XboxJoystick
 
 
 class XboxJoystickLinux(XboxJoystick):

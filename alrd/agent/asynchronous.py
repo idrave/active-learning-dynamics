@@ -1,5 +1,5 @@
 from threading import Event, Thread
-from alrd.subscriber import TopicServer
+from alrd.environment.robomaster.subscriber import TopicServer
 from mbse.agents.model_based.model_based_agent import ModelBasedAgent
 from mbse.optimizers.sac_based_optimizer import SACOptimizer
 import jax

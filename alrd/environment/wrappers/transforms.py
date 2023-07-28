@@ -3,11 +3,11 @@ import gym
 from gym import spaces
 import logging
 import time
-from alrd.environment.env import BaseRobomasterEnv
-from alrd.utils import rotate_2d_vector
-from alrd.subscriber import ChassisSub
+from alrd.environment.robomaster.env import BaseRobomasterEnv
+from alrd.utils.utils import rotate_2d_vector
+from alrd.environment.robomaster.subscriber import ChassisSub
 from gym.core import Env
-from alrd.environment.names import *
+from alrd.environment.robomaster.names import *
 logger = logging.getLogger(__name__)
 
 class CosSinObsWrapper(gym.ObservationWrapper):

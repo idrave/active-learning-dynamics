@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from alrd.utils import rotate_2d_vector_jax
+from alrd.utils.utils import rotate_2d_vector_jax
 from mbse.utils.replay_buffer import EpisodicReplayBuffer
 
 def rotate_obs(center, obs, angle_change):

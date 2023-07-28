@@ -1,5 +1,5 @@
 from alrd.agent import AgentReset
-from alrd.xbox.xbox_joystick_factory import XboxJoystickFactory
+from alrd.utils.xbox.xbox_joystick_factory import XboxJoystickFactory
 from typing import Optional
 import numpy as np
 

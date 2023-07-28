@@ -9,7 +9,7 @@
 
 import time
 
-from alrd.xbox.xbox_joystick import XboxJoystick
+from alrd.utils.xbox.xbox_joystick import XboxJoystick
 import XInput as xinput
 
 

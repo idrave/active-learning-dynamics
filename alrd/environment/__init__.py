@@ -7,9 +7,9 @@ from typing import Optional
 from alrd.environment.wrappers.transforms import CosSinObsWrapper, GlobalFrameActionWrapper
 
 import numpy as np
-from alrd.environment.env import (BaseRobomasterEnv, PositionControlEnv,
+from alrd.environment.robomaster.env import (BaseRobomasterEnv, PositionControlEnv,
                                   init_robot)
-from alrd.environment.maze import (MazeEnv, MazeGoalEnv, MazeGoalKinemEnv,
+from alrd.environment.robomaster.maze_env import (MazeEnv, MazeGoalEnv, MazeGoalKinemEnv,
                                    MazeGoalPositionEnv, MazeGoalVelocityEnv,
                                    create_maze_env)
 from alrd.environment.spot.record import Episode, Session

@@ -14,7 +14,7 @@ from alrd.environment.spot.robot_state import SpotState
 from alrd.environment.spot.spotgym import SpotGym 
 from alrd.environment.spot.spot import SpotEnvironmentConfig
 from alrd.environment.spot.utils import MAX_ANGULAR_SPEED, MAX_SPEED, get_front_coord
-from alrd.utils import change_frame_2d, rotate_2d_vector, Frame2D
+from alrd.utils.utils import change_frame_2d, rotate_2d_vector, Frame2D
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from gym import spaces
 from scipy.spatial.transform import Rotation as R
