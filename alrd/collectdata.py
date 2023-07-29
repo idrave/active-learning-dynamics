@@ -26,7 +26,9 @@ from alrd.environment import (BaseRobomasterEnv, create_robomaster_env,
                               create_spot_env)
 from alrd.environment.robomaster.filter import KalmanFilter
 from alrd.environment.spot.spotgym import ResetEnum
+from alrd.environment.wrappers.video_recorder import VideoRecordingWrapper
 from alrd.utils.utils import get_timestamp_str
+from alrd.utils.video_recorder import VideoRecorder
 from gym.wrappers.rescale_action import RescaleAction
 from gym.wrappers.time_limit import TimeLimit
 
@@ -138,7 +140,7 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
                     pbar.update(1)
         else:
             obs = next_obs
-    env.reset()
+        env.stop_robot()
 
 def add_common_args(main_parser: argparse.ArgumentParser):
     main_parser.add_argument('--tag', type=str, default='data')
@@ -186,6 +188,7 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     parser.add_argument('--optimizer_checkpoint', default=None, type=str, help='Path to optimizer checkpoint')
     parser.add_argument('--query_goal', action='store_true', help='Whether to query the goal from the user at every reset')
     parser.add_argument('--avoid_pose_reset', action='store_true', help="Whether to reset the robot's pose only when necessary and not at every episode")
+    parser.add_argument('--record_camera', type=int, default=None, help='Record from camera at the specified index')
 
 def collect_data(args):
     output_dir = Path(args.output)/('%s-%s'%(args.tag,get_timestamp_str()))
@@ -231,6 +234,9 @@ def collect_data(args):
             log_dir=output_dir,
             query_goal=args.query_goal
         )
+        if args.record_camera is not None:
+            video_recorder = VideoRecorder(output_dir/'video', args.record_camera)
+            env = VideoRecordingWrapper(env, video_recorder)
         rng, agent_rng = jax.random.split(rng)
         agent = create_spot_agent(
             observation_space=env.observation_space,

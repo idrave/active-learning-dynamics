@@ -12,8 +12,6 @@ from alrd.environment.robomaster.env import (BaseRobomasterEnv, PositionControlE
 from alrd.environment.robomaster.maze_env import (MazeEnv, MazeGoalEnv, MazeGoalKinemEnv,
                                    MazeGoalPositionEnv, MazeGoalVelocityEnv,
                                    create_maze_env)
-from alrd.environment.spot.record import Episode, Session
-from alrd.environment.spot.robot_state import KinematicState
 from alrd.environment.spot.spot import SpotEnvironmentConfig
 from alrd.environment.spot.spot2d import (Spot2DEnv, Spot2DReward,
                                           change_spot2d_obs_frame)
