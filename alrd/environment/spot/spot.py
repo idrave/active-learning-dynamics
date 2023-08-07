@@ -543,6 +543,7 @@ class SpotGymStateMachine(SpotGymBase):
             self.logger.error("Error in shutdown loop:\n"+traceback.format_exc())
             self.__state = State.SHUTDOWN
             self._shutdown()
+            self.__queue.put(StateMachineRequest(StateMachineAction.SHUTDOWN_DONE, True))
 
     def _issue_shutdown(self) -> Tuple[bool, None]:
         request = StateMachineRequest(StateMachineAction.SHUTDOWN)

@@ -104,17 +104,17 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             oob: Whether the robot was out of bounds in the new state returned
         """
         if not self.isopen or self.should_reset:
-            raise RuntimeError("Environment is closed or should be reset but step was called.")
+            if not self.isopen:
+                raise RuntimeError("Environment is closed step was called.")
+            else:
+                raise RuntimeError("Environment should be reset but step was called.")
         start_cmd = time.time()
         success, result = self._issue_command(cmd, 1/self.__cmd_freq)
         cmd_time = time.time() - start_cmd
         if not success:
             # command was interrupted
-            self._end_episode()
-            return None, cmd_time, None, None, False
+            return None, cmd_time, None, None
         next_state, read_time, oob = result
-        if next_state is None or oob:
-            self._end_episode()
         return next_state, cmd_time, read_time, oob
 
     @abstractmethod
@@ -147,17 +147,19 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             next_state = self.__last_robot_state
         if oob:
             truncate = True
+        obs = self.get_obs_from_state(next_state)
+        reward = self.get_reward(action, obs)
+        done = self.is_done(obs)
         if self.session is not None:
             self.__current_episode.add(cmd, next_state, reward, done)
         if self.log_str:
             self.print_to_file(cmd, self.__last_robot_state, time.time())
         self.__last_robot_state = next_state
-        obs = self.get_obs_from_state(next_state)
-        reward = self.get_reward(action, obs)
-        done = self.is_done(obs)
+        if truncate:
+            self._end_episode()
         if done:
             self.stop_robot()
-        return obs, reward, done, done, info
+        return obs, reward, done, truncate, info
 
     def _reset(self, action: ResetEnum) -> Tuple[SpotState | None, float] | None:
         """
@@ -204,7 +206,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         action = options.get("action", ResetEnum.RESET_POSE)
         result = self._reset(action)
         if result is None:
-            return None, {}
+            return None, {} # TODO raise exception
         state, read_time = result
         info = {"read_time": read_time}
         if state is None:

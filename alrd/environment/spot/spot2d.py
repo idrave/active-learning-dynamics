@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 from jax import jit 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from alrd.environment.spot.command import Command, CommandEnum
@@ -34,13 +35,15 @@ class Spot2DReward(RewardModel):
 
     @functools.partial(jit, static_argnums=0) # assumes object is static
     def predict(self, obs, action, next_obs=None, rng=None):
-        x, y, cos, sin = obs[:4]
+        pos = obs[...,0:2]
+        cos = obs[...,2]
+        sin = obs[...,3]
         #front_x, front_y = get_front_coord(x, y, cos, sin)
-        reward = self._tolerance((jnp.linalg.norm(jnp.array([x, y]) - self._goal_pos[:2])) / self._dist_margin)
+        reward = self._tolerance((jnp.linalg.norm(pos - self._goal_pos[:2], axis=-1)) / self._dist_margin)
         angle_diff = jnp.abs(jnp.arctan2(sin, cos) - self._goal_pos[2])
-        angle_diff = jnp.min(jnp.array([angle_diff, 2 * jnp.pi - angle_diff]))
+        angle_diff = jnp.where(angle_diff < 2 * jnp.pi - angle_diff, angle_diff, 2 * jnp.pi - angle_diff)
         reward = 0.5 * reward + 0.5 * self._tolerance(angle_diff / self._angle_margin)
-        vel_reward = self._tolerance(jnp.linalg.norm(obs[4:7]))
+        vel_reward = self._tolerance(jnp.linalg.norm(obs[..., 4:7]))
         reward = reward * (1 - self.velocity_cost) + vel_reward * self.velocity_cost 
         cost = jnp.linalg.norm(action) / jnp.linalg.norm(jnp.array([1,1,1]))
         return (reward * (1 - self.action_cost) + (1 - cost) * self.action_cost)
@@ -56,6 +59,7 @@ class Spot2DEnv(SpotGym):
                  monitor_freq: float = 30,
                  log_dir: str | Path | None = None,
                  action_cost=0.0,
+                 velocity_cost=0.0,
                  always_reset_pos: bool = True):
         session = Session(only_kinematic=True, cmd_type=CommandEnum.MOBILITY)
         super().__init__(config, cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=True, always_reset_pos=always_reset_pos)
@@ -64,7 +68,7 @@ class Spot2DEnv(SpotGym):
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                         high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.goal_pos = None # goal position in vision frame
-        self.reward = Spot2DReward(action_cost=action_cost)
+        self.reward = Spot2DReward(action_cost=action_cost, velocity_cost=velocity_cost)
 
     def start(self):
         super().start()

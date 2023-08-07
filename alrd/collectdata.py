@@ -140,7 +140,7 @@ def collect_data_buffer(agent: Agent, env: Union[BaseRobomasterEnv, SpotGym], bu
                     pbar.update(1)
         else:
             obs = next_obs
-        env.stop_robot()
+    env.stop_robot()
 
 def add_common_args(main_parser: argparse.ArgumentParser):
     main_parser.add_argument('--tag', type=str, default='data')
@@ -235,8 +235,9 @@ def collect_data(args):
             query_goal=args.query_goal
         )
         if args.record_camera is not None:
-            video_recorder = VideoRecorder(output_dir/'video', args.record_camera)
-            env = VideoRecordingWrapper(env, video_recorder)
+            video_dir = output_dir/'video'
+            video_dir.mkdir()
+            env = VideoRecordingWrapper(env, video_dir, args.record_camera)
         rng, agent_rng = jax.random.split(rng)
         agent = create_spot_agent(
             observation_space=env.observation_space,
