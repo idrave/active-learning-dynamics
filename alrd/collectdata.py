@@ -26,9 +26,9 @@ from alrd.environment import (BaseRobomasterEnv, create_robomaster_env,
                               create_spot_env)
 from alrd.environment.robomaster.filter import KalmanFilter
 from alrd.environment.spot.spotgym import ResetEnum
+from alrd.environment.spot.wrappers import Trajectory2DWrapper
 from alrd.environment.wrappers.video_recorder import VideoRecordingWrapper
 from alrd.utils.utils import get_timestamp_str
-from alrd.utils.video_recorder import VideoRecorder
 from gym.wrappers.rescale_action import RescaleAction
 from gym.wrappers.time_limit import TimeLimit
 
@@ -189,6 +189,7 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     parser.add_argument('--query_goal', action='store_true', help='Whether to query the goal from the user at every reset')
     parser.add_argument('--avoid_pose_reset', action='store_true', help="Whether to reset the robot's pose only when necessary and not at every episode")
     parser.add_argument('--record_camera', type=int, default=None, help='Record from camera at the specified index')
+    parser.add_argument('--save_trajectory', action='store_true', help='Save trajectory plot to file')
 
 def collect_data(args):
     output_dir = Path(args.output)/('%s-%s'%(args.tag,get_timestamp_str()))
@@ -238,6 +239,10 @@ def collect_data(args):
             video_dir = output_dir/'video'
             video_dir.mkdir()
             env = VideoRecordingWrapper(env, video_dir, args.record_camera)
+        if args.save_trajectory:
+            img_dir = output_dir/'img'
+            img_dir.mkdir()
+            env = Trajectory2DWrapper(env, img_dir)
         rng, agent_rng = jax.random.split(rng)
         agent = create_spot_agent(
             observation_space=env.observation_space,

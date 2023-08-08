@@ -31,6 +31,7 @@ class VideoRecorder:
             if ret:
                 # Initialize the video writer when the first frame is captured
                 if video_writer is None:
+                    print('video writer initializing')
                     frame_height, frame_width, _ = frame.shape
                     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                     video_writer = cv2.VideoWriter(self.output_file, fourcc, 20.0, (frame_width, frame_height))

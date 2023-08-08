@@ -36,7 +36,6 @@ class Trajectory2DWrapper(Wrapper):
     def reset(self, **kwargs):
         if len(self.__trajectory) > 0:
             self.__save_trajectory()
-            self.__trajectory = []
         obs, info = self.env.reset(**kwargs)    
         self.__trajectory.append(obs[:2])
         return obs, info
@@ -46,13 +45,20 @@ class Trajectory2DWrapper(Wrapper):
         self.__trajectory.append(obs[:2])
         if terminated or truncated:
             self.__save_trajectory()
-            self.__trajectory = []
         return obs, reward, terminated, truncated, info
+    
+    def close(self):
+        self.__save_trajectory()
+        super().close()
 
     def __save_trajectory(self):
-        trajectory = np.array(self.__trajectory)
-        plt.figure()
-        plt.scatter(trajectory[:, 0], trajectory[:, 1], c=np.linspace(0.2,1,trajectory.shape[0]), cmap="Reds")
-        plt.savefig(self.__output_dir / f'{self.__counter:03d}.png')
-        plt.close()
-        self.__counter += 1
+        if len(self.__trajectory) > 0:
+            trajectory = np.array(self.__trajectory)
+            plt.figure()
+            plt.xlim(self.env.observation_space.low[0], self.env.observation_space.high[0])
+            plt.ylim(self.env.observation_space.low[1], self.env.observation_space.high[1])
+            plt.scatter(trajectory[:, 0], trajectory[:, 1], c=np.linspace(0.2,1,trajectory.shape[0]), cmap="Reds")
+            plt.savefig(self.__output_dir / f'{self.__counter:03d}.png')
+            #plt.close()
+            self.__counter += 1
+            self.__trajectory = []
