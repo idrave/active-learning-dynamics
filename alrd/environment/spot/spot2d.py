@@ -48,6 +48,10 @@ class Spot2DReward(RewardModel):
         cost = jnp.linalg.norm(action) / jnp.linalg.norm(jnp.array([1,1,1]))
         return (reward * (1 - self.action_cost) + (1 - cost) * self.action_cost)
 
+MIN_X = -4
+MIN_Y = -3
+MAX_X = 4
+MAX_Y = 3
 
 class Spot2DEnv(SpotGym):
     obs_shape = (7,)
@@ -63,8 +67,8 @@ class Spot2DEnv(SpotGym):
                  always_reset_pos: bool = True):
         session = Session(only_kinematic=True, cmd_type=CommandEnum.MOBILITY)
         super().__init__(config, cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=True, always_reset_pos=always_reset_pos)
-        self.observation_space = spaces.Box(low=np.array([config.min_x, config.min_y, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
-                                            high=np.array([config.max_x, config.max_y, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
+        self.observation_space = spaces.Box(low=np.array([MIN_X, MIN_Y, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
+                                            high=np.array([MAX_X, MAX_Y, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                         high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.goal_pos = None # goal position in vision frame

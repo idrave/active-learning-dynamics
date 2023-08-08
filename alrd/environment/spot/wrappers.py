@@ -26,6 +26,18 @@ class QueryGoalWrapper(Wrapper):
         options['goal'] = np.array([float(x), float(y), float(angle)])
         return self.env.reset(seed=seed, options=options)
 
+class FixedGoal2DWrapper(Wrapper):
+    def __init__(self, env: Spot2DEnv, goal: np.ndarray):
+        assert goal.shape == (3,)
+        super().__init__(env)
+        self.goal = goal
+    
+    def reset(self, seed: int | None = None, options: dict | None = None):
+        if options is None:
+            options = {}
+        options['goal'] = self.goal
+        return self.env.reset(seed=seed, options=options)
+
 class Trajectory2DWrapper(Wrapper):
     def __init__(self, env: Spot2DEnv, output_dir: str):
         super().__init__(env)
