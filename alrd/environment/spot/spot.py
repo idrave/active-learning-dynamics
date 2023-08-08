@@ -64,9 +64,16 @@ EXPECTED_STATE_READ_TIME = 0.02     # Expected time for the robot to read its st
 COMMAND_DURATION = 0.5              # Duration of regular commands sent to spot (while not replaced by new command) (s)
 MAX_MAIN_WAIT = 10.0                # Maximum time the state machine main loop sleeps
 
+class SpotVerbose(Enum):
+    DEFAULT = 0
+    VERBOSE = 1
+
 class SpotGymBase(object):
     """SpotGym class initializes the robot and provides methods to control it and read the state.
 
+    Args:
+        verbose: verbosity level, default: basic environment information printed, verbose: networking errors printed
+    
     Attributes:
         client_name: Common name of this program to use in the SDK calls.
         robot: Instance of the robot.
@@ -77,8 +84,7 @@ class SpotGymBase(object):
         has_robot_control: Boolean whether program has acquired robot control.
         motors_powered: Boolean whether the robot motors are powered.
     """
-
-    def __init__(self):
+    def __init__(self, verbose=SpotVerbose.DEFAULT):
         super().__init__()
         self.client_name = "SpotGym"
         self.robot = None
@@ -94,6 +100,7 @@ class SpotGymBase(object):
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
+        self.verbose = verbose
 
     def initialize_robot(self, hostname):
         """Initializes SDK from hostname.
@@ -216,7 +223,8 @@ class SpotGymBase(object):
                 blocking_stand(self.command_client, timeout_sec=endtime-current, update_frequency=STOP_SLEEP_TIME)
                 done = True
             except Exception as e:
-                self.logger.warning('Error stopping robot:\n'+traceback.format_exc())
+                if self.verbose == SpotVerbose.VERBOSE:
+                    self.logger.warning('Error stopping robot:\n'+traceback.format_exc())
             if not done and endtime > time.time():
                 time.sleep(STOP_SLEEP_TIME)
             else:
@@ -236,7 +244,8 @@ class SpotGymBase(object):
                 cmd_id = self.command_client.robot_command_async(cmd, end_time_secs=endtime).result() 
                 done = block_for_trajectory_cmd(self.command_client, cmd_id, timeout_sec=endtime - time.time())
             except:
-                self.logger.warning('Error resetting robot:\n'+traceback.format_exc())
+                if self.verbose == SpotVerbose.VERBOSE:
+                    self.logger.warning('Error resetting robot:\n'+traceback.format_exc())
             if not done and endtime > time.time():
                 time.sleep(RESET_SLEEP_TIME)
             else:
@@ -258,7 +267,8 @@ class SpotGymBase(object):
                 if check_until_done_future.done():
                     state = SpotState.from_robot_state(time.time(), check_until_done_future.result())
             except:
-                self.logger.warning('Error reading state:\n'+traceback.format_exc())
+                if self.verbose == SpotVerbose.VERBOSE:
+                    self.logger.warning('Error reading state:\n'+traceback.format_exc())
             if state is None and endtime > time.time():
                 time.sleep(READ_STATE_SLEEP_PERIOD)
             else:
@@ -353,9 +363,14 @@ class SpotGymStateMachine(SpotGymBase):
     """
     Assumes only one thread is calling issue command and reset.
     """
-    def __init__(self, config: SpotEnvironmentConfig, monitor_freq=30.):
+    def __init__(self, config: SpotEnvironmentConfig, monitor_freq=30., **args):
+        """
+        Params:
+            config: configuration of the environment
+            monitor_freq: frequency of monitoring the robot state in Hz
+        """
         assert 1/monitor_freq > EXPECTED_STATE_READ_TIME, "monitor_freq is too high"
-        super().__init__()
+        super().__init__(**args)
         self.__state = State.SHUTDOWN
         self.__main = threading.Thread(target=self.__main_loop)
         self.__cmd_thread = threading.Thread(target=self.__cmd_loop)

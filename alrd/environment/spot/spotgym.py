@@ -211,4 +211,6 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         info = {"read_time": read_time}
         if state is None:
             return None, info
-        return self.get_obs_from_state(state), info
+        obs = self.get_obs_from_state(state)
+        self.logger.info('Resetting with initial observation {}'.format(obs))
+        return obs, info
