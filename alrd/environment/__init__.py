@@ -36,7 +36,7 @@ from alrd.environment.wrappers.transforms import (
 )
 from jax import vmap
 
-from mbse.utils.replay_buffer import EpisodicReplayBuffer, Transition
+from mbse.utils.replay_buffer import EpisodicReplayBuffer, Transition, ReplayBuffer
 
 __all__ = [
     "BaseRobomasterEnv",
@@ -142,6 +142,47 @@ def create_spot_env(
         env = QueryGoalWrapper(env)
     return env
 
+
+def load_dataset(
+    buffer_path: str,
+    goal=None,
+    action_cost: float = 0.0,
+    velocity_cost: float = 0.0,
+    normalize: bool = True,
+    action_normalize: bool = False,
+    learn_deltas: bool = True
+):
+    """
+    Parameters
+        buffer_path: path to input buffer
+        goal: goal position (x, y)
+        action_cost: action cost used to compute reward when goal is specified
+        velocity_cost: velocity cost used to compute reward when goal is specified
+        action_normalize: whether to normalize actions
+    """
+    data = pickle.load(open(buffer_path, "rb"))
+    obs_shape = (7,)
+    action_shape = (3,)
+    assert isinstance(data, ReplayBuffer)
+    buffer = ReplayBuffer(
+        obs_shape=obs_shape,
+        action_shape=action_shape,
+        normalize=normalize,
+        action_normalize=action_normalize,
+        learn_deltas=learn_deltas,
+    )
+    if goal is not None:
+        reward_model = Spot2DReward(
+            action_cost=action_cost, velocity_cost=velocity_cost
+        )
+        reward_fn = reward_model.predict
+    tran = data.get_full_raw_data()
+    if goal is not None:
+        tran.obs[:] = change_spot2d_obs_frame(tran.obs, goal[:2], goal[2])
+        tran.next_obs[:] = change_spot2d_obs_frame(tran.next_obs, goal[:2], goal[2])
+        tran.reward[:, 0] = reward_fn(tran.next_obs, tran.action)[:]
+    buffer.add(tran)
+    return buffer
 
 def load_episodic_dataset(
     buffer_path: str,
