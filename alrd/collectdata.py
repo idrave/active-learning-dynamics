@@ -184,6 +184,7 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     parser.add_argument('config', type=str, help='Environment configuration file')
     parser.add_argument('--monitor', type=int, default=30, help='Frequency at which the environment checks if the robot is within boundaries (default: 30))')
     parser.add_argument('-a', '--agent', default=SpotAgentEnum.KEYBOARD.value, type=str, help='Agent to use', choices=[a.value for a in SpotAgentEnum])
+    parser.add_argument('--explore', action='store_true', help='Whether to get exploration actions from the SAC agent')
     parser.add_argument('--smoothing', default=None, type=float, help='Smoothing factor for the actions')
     parser.add_argument('--optimizer_checkpoint', default=None, type=str, help='Path to optimizer checkpoint')
     parser.add_argument('--query_goal', action='store_true', help='Whether to query the goal from the user at every reset')
@@ -250,7 +251,8 @@ def collect_data(args):
             agent_type=agent_type,
             optimizer_path=args.optimizer_checkpoint,
             smoothing_coeff=args.smoothing,
-            rng=agent_rng
+            rng=agent_rng,
+            explore=args.explore
         )
         buffer = EpisodicReplayBuffer(
             obs_shape=env.observation_space.shape,

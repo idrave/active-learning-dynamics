@@ -63,7 +63,7 @@ class SpotAgentEnum(Enum):
     SAC='sac'
 
 def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum, optimizer_path: str | None,
-                      smoothing_coeff: float | None, rng):
+                      smoothing_coeff: float | None, rng, explore: bool):
     if agent_type == SpotAgentEnum.KEYBOARD:
         base_agent = KeyboardAgent(xy_speed=1, a_speed=1)
         return KeyboardResetAgent(base_agent)
@@ -94,7 +94,7 @@ def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum
                 optimizer_kwargs={'sac_kwargs': sac_kwargs}
             )
         agent.update_optimizer(sac_optimizer)
-        return ModelBasedAgentAdapter(agent, rng)
+        return ModelBasedAgentAdapter(agent, rng, eval=not explore)
     else:
         raise NotImplementedError(f'Agent type {agent_type} not implemented')
 
