@@ -110,6 +110,12 @@ class Spot2DEnv(SpotGym):
     def is_done(self, obs: np.ndarray) -> bool:
         return False
 
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]:
+        obs, reward, terminate, truncate, info = super().step(action)
+        info['dist'] = np.linalg.norm(obs[:2])
+        info['angle'] = np.arctan2(obs[3], obs[2])
+        return obs, reward, terminate, truncate, info
+
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
         if options is None:
             options = {}

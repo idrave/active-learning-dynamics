@@ -136,7 +136,6 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]:
         """
         Converts the action to a robot command, applies it and returns the next state as a numpy array
-        If the 
         """
         cmd = self.get_cmd_from_action(action)
         next_state, cmd_time, read_time, oob = self._step(cmd)
