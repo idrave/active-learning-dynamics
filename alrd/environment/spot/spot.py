@@ -117,14 +117,15 @@ class SpotGymBase(object):
         self.lease_client = self.robot.ensure_client(LeaseClient.default_service_name)
         self.estop_client = self.robot.ensure_client(EstopClient.default_service_name)
         self.robot_state_client = self.robot.ensure_client(RobotStateClient.default_service_name)
-        self.robot_state_server = StateService(self.robot_state_client)
+        #self.robot_state_server = StateService(self.robot_state_client)
 
     def _start(self):
         if self.estop_keepalive is None:
             self._toggle_estop()
         self._gain_control()
+        
         self._power_motors()
-        self.robot_state_server.start()
+        #self.robot_state_server.start()
 
     def _shutdown(self):
         """Returns lease to power off.
@@ -135,7 +136,7 @@ class SpotGymBase(object):
         not self.robot.is_powered_on():
             self.logger.info("Robot is already off!")
             return
-        self.robot_state_server.close()
+        #self.robot_state_server.close()
         blocking_sit(self.command_client, timeout_sec=SHUTDOWN_TIMEOUT, update_frequency=10.)
         self.robot.power_off(cut_immediately=False, timeout_sec=SHUTDOWN_TIMEOUT)
         self.motors_powered = False
