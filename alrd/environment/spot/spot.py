@@ -16,7 +16,6 @@ import bosdyn.client.util
 import numpy as np
 from alrd.environment.spot.command import Command 
 from alrd.environment.spot.robot_state import SpotState
-from alrd.environment.spot.state_service import StateService
 from alrd.environment.spot.utils import MAX_SPEED, get_hitbox
 from alrd.utils.utils import change_frame_2d, Frame2D
 from bosdyn.api import estop_pb2
