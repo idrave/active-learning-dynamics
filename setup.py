@@ -9,7 +9,10 @@ required = [
     'robomaster >= 0.1.1.68',
     'scikit-learn >= 1.0.2',
     'scipy >= 1.7.3',
-    'gym>=0.26.0'
+    'gym>=0.26.0',
+    'bosdyn-client>=3.3.0',
+    'bosdyn-mission>=3.3.0',
+    'bosdyn-choreography-client>=3.3.0'
 ] 
 
 extras = {}
