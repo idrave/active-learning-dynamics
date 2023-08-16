@@ -36,7 +36,7 @@ from alrd.environment.wrappers.transforms import (
 )
 from jax import vmap
 
-from mbse.utils.replay_buffer import EpisodicReplayBuffer, Transition, ReplayBuffer
+from mbse.utils.replay_buffer import EpisodicReplayBuffer, Transition, ReplayBuffer, BaseBuffer
 
 __all__ = [
     "BaseRobomasterEnv",
@@ -163,7 +163,7 @@ def load_dataset(
     data = pickle.load(open(buffer_path, "rb"))
     obs_shape = (7,)
     action_shape = (3,)
-    assert isinstance(data, ReplayBuffer)
+    assert isinstance(data, BaseBuffer)
     buffer = ReplayBuffer(
         obs_shape=obs_shape,
         action_shape=action_shape,
@@ -268,3 +268,23 @@ def add_2d_zero_samples(buffer: EpisodicReplayBuffer, num_samples: int, reward_m
             done=np.zeros((num_samples, 1)),
         )
     )
+
+def get_first_n(buffer: BaseBuffer, n: int):
+    """ Get a buffer with same args as buffer but with only first n transitions """
+    tran = buffer.get_full_raw_data()
+    new_tran = Transition(
+        obs=tran.obs[:n],
+        action=tran.action[:n],
+        next_obs=tran.next_obs[:n],
+        reward=tran.reward[:n],
+        done=tran.done[:n],
+    )
+    new_buffer = ReplayBuffer(
+        obs_shape=buffer.obs_shape,
+        action_shape=buffer.action_shape,
+        normalize=buffer.normalize,
+        action_normalize=buffer.action_normalize,
+        learn_deltas=buffer.learn_deltas,
+    )
+    new_buffer.add(new_tran)
+    return new_buffer
