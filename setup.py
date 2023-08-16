@@ -12,7 +12,8 @@ required = [
     'gym>=0.26.0',
     'bosdyn-client>=3.3.0',
     'bosdyn-mission>=3.3.0',
-    'bosdyn-choreography-client>=3.3.0'
+    'bosdyn-choreography-client>=3.3.0',
+    'shapely>=2.0.1'
 ] 
 
 extras = {}
