@@ -13,7 +13,8 @@ required = [
     'bosdyn-client>=3.3.0',
     'bosdyn-mission>=3.3.0',
     'bosdyn-choreography-client>=3.3.0',
-    'shapely>=2.0.1'
+    'shapely>=2.0.1',
+    'jdm_control @ git+ssh://git@github.com/idrave/jdm_control.git'
 ] 
 
 extras = {}
