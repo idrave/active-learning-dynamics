@@ -15,6 +15,7 @@ from alrd.environment.spot.record import Session, Episode
 from alrd.environment.spot.robot_state import SpotState
 from alrd.environment.spot.spot import (COMMAND_DURATION, CHECK_TIMEOUT,
                                         SpotGymStateMachine, SpotEnvironmentConfig, State)
+from alrd.environment.spot.utils import Vector3D
 from alrd.utils.utils import get_timestamp_str
 
 from enum import Enum
@@ -46,6 +47,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         self.__should_reset = True
         self.__last_robot_state = None
         self.__current_episode = None
+        self.__default_reset = (config.start_x, config.start_y, config.start_angle)
         self.log_dir = Path(log_dir) if log_dir is not None else None
         self.log_file = None
         self.session = session
@@ -160,7 +162,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             self.stop_robot()
         return obs, reward, done, truncate, info
 
-    def _reset(self, action: ResetEnum) -> Tuple[SpotState | None, float] | None:
+    def _reset(self, action: ResetEnum, pose: Vector3D) -> Tuple[SpotState | None, float] | None:
         """
         Reset the robot to the origin.
         """
@@ -179,7 +181,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             if reset_pose:
                 input("Press enter to reset the robot to the origin... ")
                 # reset position
-                success, _ = self._issue_reset()
+                success, _ = self._issue_reset(pose)
                 if not success:
                     self.logger.error("Failed to reset robot position")
                     return None
@@ -203,7 +205,10 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         if options is None:
             options = {}
         action = options.get("action", ResetEnum.RESET_POSE)
-        result = self._reset(action)
+        pose = options.get("pose", self.__default_reset)
+        # TODO: check input types
+        pose = Vector3D(*pose)
+        result = self._reset(action, pose)
         if result is None:
             return None, {} # TODO raise exception
         state, read_time = result
