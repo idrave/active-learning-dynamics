@@ -1,9 +1,8 @@
-from alrd.environment.robomaster.env import VelocityControlEnv
 from alrd.utils.keyboard import KeyboardListener
 from alrd.agent.absagent import Agent, AgentReset
 import numpy as np
-from alrd.utils.utils import rotate_2d_vector
 from typing import Union
+import textwrap
 
 class KeyboardAgent(Agent):
     def __init__(self, xy_speed, a_speed, noangle=False) -> None:
@@ -19,6 +18,22 @@ class KeyboardAgent(Agent):
             'e': (0, 0, 1)
         }
         self.noangle = noangle
+    
+    def description(self):
+        s = textwrap.dedent("""
+            Keyboard control:
+            --------------
+            w: move forward
+            a: move left
+            s: move backward
+            d: move right
+            """)
+        if not self.noangle:
+            s += textwrap.dedent("""
+            q: rotate left
+            e: rotate right
+            """)
+        return s
 
     def act(self, obs):
         pressed = list(self.listener.which_pressed(self.cmds.keys()))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import textwrap
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
@@ -16,6 +17,7 @@ from alrd.environment.spot.spotgym import SpotGym
 from alrd.environment.spot.spot import SpotEnvironmentConfig
 from alrd.environment.spot.utils import MAX_ANGULAR_SPEED, MAX_SPEED, get_front_coord
 from alrd.utils.utils import change_frame_2d, rotate_2d_vector, Frame2D
+from alrd.agent.keyboard import KeyboardResetAgent, KeyboardAgent
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
 from gym import spaces
 from scipy.spatial.transform import Rotation as R
@@ -64,15 +66,22 @@ class Spot2DEnv(SpotGym):
                  log_dir: str | Path | None = None,
                  action_cost=0.0,
                  velocity_cost=0.0,
-                 always_reset_pos: bool = True):
-        session = Session(only_kinematic=True, cmd_type=CommandEnum.MOBILITY)
-        super().__init__(config, cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=True, always_reset_pos=always_reset_pos)
+                 always_reset_pos: bool = True,
+                 skip_ui: bool = False,
+                 log_str=True):
+        if log_dir is None:
+            session = None
+        else:
+            session = Session(only_kinematic=True, cmd_type=CommandEnum.MOBILITY)
+        super().__init__(config, cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=log_str, always_reset_pos=always_reset_pos)
         self.observation_space = spaces.Box(low=np.array([MIN_X, MIN_Y, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                             high=np.array([MAX_X, MAX_Y, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                         high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.goal_pos = None # goal position in vision frame
         self.reward = Spot2DReward(action_cost=action_cost, velocity_cost=velocity_cost)
+        self.__keyboard = KeyboardResetAgent(KeyboardAgent(0.5, 0.5))
+        self.__skip_ui = skip_ui
 
     def start(self):
         super().start()
@@ -115,8 +124,68 @@ class Spot2DEnv(SpotGym):
         info['dist'] = np.linalg.norm(obs[:2])
         info['angle'] = np.arctan2(obs[3], obs[2])
         return obs, reward, terminate, truncate, info
+    
+    def _show_ui(self):
+        MANUAL_CONTROL_FREQ = 10
+        input('called reset, press enter to continue...')
+        prompt = input('type "yes" to enter options menu or press enter to continue: ')
+        if len(prompt) == 0:
+            return
+        if prompt != 'yes':
+            print(f'entered "{prompt}". continuing to reset...')
+        else:
+            option = None
+            while option != 'c':
+                option = input(textwrap.dedent("""
+                    Options:
+                    --------------
+                    k: keyboard control
+                    r: reset base position to current position
+                    c: continue
+                    h: why am I seeing this?
+                    answer: """))
+                while option not in ['k', 'r', 'c', 'h']:
+                    print(f'entered "{option}". invalid option...')
+                    option = input('answer: ')
+                if option == 'k':
+                    print(self.__keyboard.kb_agent.description() + "\nk: end manual control")
+                    action = self.__keyboard.act(None)
+                    while action is not None:
+                        success, result = self._issue_unmonitored_command(self.get_cmd_from_action(action), 1/MANUAL_CONTROL_FREQ)
+                        if not success:
+                            print("command failed, exiting manual control. press enter to continue...")
+                            break
+                        action = self.__keyboard.act(None)
+                    input("manual control ended. press enter to go back to options...")
+                elif option == 'r':
+                    print("WARNING: boundary safety checks and reset position will now be computed relative to the current pose")
+                    confirm = input("confirm action by entering yes: ")
+                    if confirm == 'yes':
+                        self.set_start_frame()
+                        print("origin reset done")
+                    else:
+                        print("origin reset cancelled")
+                elif option == 'h':
+                    print(textwrap.dedent("""
+                        The robot continualy updates an estimate of its position using its onboard sensors
+                        and camera. After long periods of operation, this estimate can drift from the truth,
+                        which affects the safety checks done by the environment.
+                        This interface allows you to move the robot to the position where the program was
+                        started and reset the base pose that the environment uses to compute the safety
+                        checks, which are expressed relative to this base pose."""))
+                    input("press enter to go back to options...")
+                else:
+                    print("continuing...")
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
+        if not self.__skip_ui:
+            # TODO this stop should not be necessary, but need this for now to guarantee the unmonitored
+            # command works in the state machine
+            success = self._issue_stop()
+            if not success:
+                self.logger.error("Reset stop failed")
+                return None, {}
+            self._show_ui()
         if options is None:
             options = {}
         goal = options.get("goal", None) # optional goal expressed relative to environment frame

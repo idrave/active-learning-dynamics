@@ -38,7 +38,7 @@ class SpotXbox2D(AgentReset):
         Mapping
         Button Combination    -> Functionality
         --------------------------------------
-        LB + RB + B           -> Reset
+        LB + RB + B           -> Return None
           Left Stick          -> Move
           Right Stick         -> Turn
 
