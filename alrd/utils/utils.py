@@ -4,6 +4,7 @@ from scipy.spatial.transform import Rotation
 from mbse.utils.replay_buffer import ReplayBuffer, Transition, get_past_values, BaseBuffer, EpisodicReplayBuffer
 import time
 import numpy as np
+import math
 import jax
 import jax.numpy as jnp
 from typing import Optional, Sequence, Callable
@@ -69,20 +70,26 @@ class Frame2D:
         self.angle = angle
         self.__inverse = change_frame_2d(np.array([0,0]), (x,y), angle, degrees=False)
     
-    def transform(self, vector):
+    def transform(self, vector) -> np.ndarray:
         return change_frame_2d(vector, (self.x, self.y), self.angle, degrees=False)
+    
+    def transform_direction(self, vector) -> np.ndarray:
+        return rotate_2d_vector(vector, self.angle, degrees=False)
     
     def transform_pose(self, x, y, angle):
         x, y = change_frame_2d(np.array([x,y]), (self.x, self.y), self.angle, degrees=False)
         angle -= self.angle
-        if angle > np.pi:
-            angle -= 2 * np.pi
-        elif angle < -np.pi:
-            angle += 2 * np.pi
+        angle = math.remainder(angle, math.tau)
         return x, y, angle
     
-    def inverse(self, vector):
+    def inverse(self, vector) -> np.ndarray:
         return change_frame_2d(vector, self.__inverse, -self.angle, degrees=False)
+    
+    def inverse_pose(self, x, y, angle):
+        x, y = change_frame_2d(np.array([x,y]), self.__inverse, -self.angle, degrees=False)
+        angle += self.angle
+        angle = np.vectorize(math.remainder)(angle, math.tau)
+        return x, y, angle
     
     def __str__(self) -> str:
         return f"Frame2D(x={self.x}, y={self.y}, angle={self.angle})"

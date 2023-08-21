@@ -78,31 +78,32 @@ class Spot2DEnv(SpotGym):
                                             high=np.array([MAX_X, MAX_Y, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                         high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
-        self.goal_pos = None # goal position in vision frame
+        self.__goal_frame = None # goal position in vision frame
         self.reward = Spot2DReward(action_cost=action_cost, velocity_cost=velocity_cost)
         self.__keyboard = KeyboardResetAgent(KeyboardAgent(0.5, 0.5))
         self.__skip_ui = skip_ui
 
     def start(self):
         super().start()
+    
+    @property
+    def goal_frame(self) -> Frame2D:
+        return self.__goal_frame
 
     def get_obs_from_state(self, state: SpotState) -> np.ndarray:
         """
         Returns
             [x, y, cos, sin, vx, vy, w] with the origin at the goal position and axis aligned to environment frame
         """
-        return Spot2DEnv.get_obs_from_state_goal(state, self.goal_pos)
+        return Spot2DEnv.get_obs_from_state_goal(state, self.__goal_frame)
 
     @staticmethod
-    def get_obs_from_state_goal(state: SpotState, goal: np.ndarray) -> np.ndarray:
-        origin = goal[:2]
-        theta0 = goal[2]
+    def get_obs_from_state_goal(state: SpotState, goal_frame: Frame2D) -> np.ndarray:
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
         angle = R.from_quat([qx, qy, qz, qw]).as_euler("xyz", degrees=False)[2]
-        x, y = change_frame_2d(np.array([x, y]), origin, theta0, degrees=False)
-        angle -= theta0
+        x, y, angle = goal_frame.transform(x, y, angle)
         vx, vy, _, _, _, w = state.velocity_of_body_in_vision
-        vx, vy = rotate_2d_vector(np.array([vx, vy]), -theta0)
+        vx, vy = goal_frame.transform_direction(np.array((vx, vy)))
         return np.array([x, y, np.cos(angle), np.sin(angle), vx, vy, w])
 
     def get_cmd_from_action(self, action: np.ndarray) -> Command:
@@ -190,13 +191,10 @@ class Spot2DEnv(SpotGym):
             options = {}
         goal = options.get("goal", None) # optional goal expressed relative to environment frame
         if goal is None:
-            #angle = self.config.start_angle
-            #goal = get_front_coord(self.config.start_x, self.config.start_y, np.cos(angle), np.sin(angle))
             goal = (self.config.start_x, self.config.start_y, self.config.start_angle)
         self.logger.info("Resetting environment with goal {}".format(goal))
-        goal_pos = self.body_start_frame.inverse(np.array(goal[:2])) # convert to vision frame
-        goal_angle = goal[2] + self.body_start_frame.angle
-        self.goal_pos = (*goal_pos, goal_angle)
+        goal_pos = self.body_start_frame.inverse_pose(*goal) # convert to vision frame
+        self.__goal_frame = Frame2D(*goal_pos)
         return super().reset(seed=seed, options=options)
 
 

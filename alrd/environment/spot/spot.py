@@ -441,8 +441,7 @@ class SpotGymStateMachine(SpotGymBase):
     
     def _set_reset_pose(self, x: float, y: float, angle: float):
         """ assumes input in environment reference frame (same as the config's starting pose) """
-        new_x, new_y = self.body_start_frame.inverse(np.array([x, y]))
-        new_angle = math.remainder(angle + self.body_start_frame.angle, math.tau)
+        new_x, new_y, new_angle = self.body_start_frame.inverse_pose(x, y, angle)
         self.__reset_pose = Vector3D(new_x, new_y, new_angle)
     
     def wait_threads(self):
