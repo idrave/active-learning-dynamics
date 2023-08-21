@@ -1,5 +1,6 @@
 from __future__ import annotations 
 
+import math
 import logging
 import queue
 import threading
@@ -411,14 +412,8 @@ class SpotGymStateMachine(SpotGymBase):
         self._start()
         self._issue_blocking_stand_command()
         # determine body pose in vision frame, which is used to reset the robot
-        state = self._read_robot_state()
-        assert state is not None
-        x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
-        theta = R.from_quat([qx, qy, qz, qw]).as_euler('xyz')[2]
-        self.__body_start_frame = Frame2D(x, y, theta)
-        reset_point = self.__body_start_frame.inverse(np.array([ self.config.start_x, self.config.start_y ]))
-        reset_angle = self.__body_start_frame.angle + self.config.start_angle
-        self.__reset_pose = Vector3D(reset_point[0], reset_point[1], reset_angle)
+        self.set_start_frame()
+        self._set_reset_pose(self.config.start_x, self.config.start_y, self.config.start_angle)
         self.logger.info("Start position: {}".format(self.__body_start_frame))
         self.__cmd_event.clear()
         self.__reset_event.clear()
@@ -436,6 +431,19 @@ class SpotGymStateMachine(SpotGymBase):
     @property
     def body_start_frame(self):
         return self.__body_start_frame
+    
+    def set_start_frame(self):
+        state = self._read_robot_state()
+        assert state is not None
+        x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
+        angle = R.from_quat([qx, qy, qz, qw]).as_euler('xyz')[2]
+        self.__body_start_frame = Frame2D(x, y, angle)
+    
+    def _set_reset_pose(self, x: float, y: float, angle: float):
+        """ assumes input in environment reference frame (same as the config's starting pose) """
+        new_x, new_y = self.body_start_frame.inverse(np.array([x, y]))
+        new_angle = math.remainder(angle + self.body_start_frame.angle, math.tau)
+        self.__reset_pose = Vector3D(new_x, new_y, new_angle)
     
     def wait_threads(self):
         self.__main.join()
@@ -526,8 +534,8 @@ class SpotGymStateMachine(SpotGymBase):
             self.logger.error("Error in reset loop:\n"+traceback.format_exc())
             self._issue_shutdown()
     
-    def _issue_reset(self, reset_pose: Vector3D) -> Tuple[bool, None]:
-        request = StateMachineRequest(StateMachineAction.RESET, reset_pose)
+    def _issue_reset(self, x: float, y: float, angle: float) -> Tuple[bool, None]:
+        request = StateMachineRequest(StateMachineAction.RESET, (x, y, angle))
         self.__queue.put(request)
         response = request.wait()
         if response is None:
@@ -607,12 +615,12 @@ class SpotGymStateMachine(SpotGymBase):
                 last_state, measured_time = self.__monitor_input
                 if last_state is None:
                     last_state = new_state
-                timeout = self.get_bounds_timeout(last_state, measured_time)
-                self.logger.debug(f'Checking bounds... timeout {timeout - time.time()}')
-                new_state = self._read_robot_state(timeout = timeout - time.time())
+                timeout = self.get_bounds_timeout(last_state, measured_time) - time.time()
+                self.logger.debug(f'Checking bounds... timeout {timeout}')
+                new_state = self._read_robot_state(timeout = timeout)
                 self.__check_bounds.clear()
                 if new_state is None:
-                    self.logger.info('Bounds srv: timed out')
+                    self.logger.info(f'Bounds srv: timed out after {timeout}')
                     self.__queue.put(StateMachineRequest(StateMachineAction.CHECK_DONE, None))
                 elif not self.is_in_bounds(new_state):
                     self.__queue.put(StateMachineRequest(StateMachineAction.CHECK_DONE, False))
@@ -631,7 +639,7 @@ class SpotGymStateMachine(SpotGymBase):
         last_state = self._read_robot_state()
         last_read = time.time()
         check_ongoing = False
-        monitor_on = True
+        monitor_on = False
         try:
             while self.__state != State.SHUTDOWN:
                 wait = MAX_MAIN_WAIT
@@ -650,8 +658,8 @@ class SpotGymStateMachine(SpotGymBase):
                 except queue.Empty:
                     continue
                 assert isinstance(request, StateMachineRequest)
-                if request.action == StateMachineAction.STEP and monitor_on:
-                    if self.__state == State.READY:
+                if request.action == StateMachineAction.STEP:
+                    if self.__state == State.READY and monitor_on:
                         self.__state = State.RUNNING
                         self.__current_cmd = request.value
                         self.__cmd_event.set()
@@ -717,7 +725,7 @@ class SpotGymStateMachine(SpotGymBase):
                     if self.__state in {State.STOPPED, State.READY}:
                         self.__state = State.RESETTING
                         self.logger.debug('State Machine: Starting reset')
-                        self.__reset_pose = request.value
+                        self._set_reset_pose(*request.value)
                         self.__reset_event.set()
                         latest_order = request
                     else:

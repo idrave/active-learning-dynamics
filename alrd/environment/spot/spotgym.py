@@ -57,7 +57,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             self.logger.addHandler(logging.FileHandler(self.log_dir / "spot_gym.log"))
 
     def start(self):
-        if not self.log_dir.is_dir():
+        if self.log_dir is not None and not self.log_dir.is_dir():
             self.log_dir.mkdir(exist_ok=False, parents=True)
         super().start()
 
@@ -162,7 +162,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             self.stop_robot()
         return obs, reward, done, truncate, info
 
-    def _reset(self, action: ResetEnum, pose: Vector3D) -> Tuple[SpotState | None, float] | None:
+    def _reset(self, action: ResetEnum, pose: np.ndarray) -> Tuple[SpotState | None, float] | None:
         """
         Reset the robot to the origin.
         """
@@ -179,13 +179,12 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
                 return None
             self.logger.info("Robot stopped")
             if reset_pose:
-                input("Press enter to reset the robot to the origin... ")
                 # reset position
-                success, _ = self._issue_reset(pose)
+                success, _ = self._issue_reset(*pose)
+                self.logger.info("Resetting robot position...")
                 if not success:
                     self.logger.error("Failed to reset robot position")
                     return None
-            input("Reset done. Press enter to continue.")
         start = time.time()
         new_state = self._read_robot_state()
         read_time = time.time() - start
@@ -207,7 +206,6 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         action = options.get("action", ResetEnum.RESET_POSE)
         pose = options.get("pose", self.__default_reset)
         # TODO: check input types
-        pose = Vector3D(*pose)
         result = self._reset(action, pose)
         if result is None:
             return None, {} # TODO raise exception
