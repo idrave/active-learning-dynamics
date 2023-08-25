@@ -26,7 +26,7 @@ from alrd.environment.spot.spot2d import (
     change_spot2d_obs_frame,
 )
 from alrd.environment.spot.spotgym import SpotGym
-from alrd.environment.spot.wrappers import QueryGoalWrapper
+from alrd.environment.spot.wrappers import QueryGoalWrapper, QueryStartWrapper
 from alrd.environment.wrappers.transforms import (
     CosSinObsWrapper,
     GlobalFrameActionWrapper,
@@ -139,6 +139,7 @@ def create_spot_env(
         velocity_cost=velocity_cost,
     )
     if query_goal:
+        env = QueryStartWrapper(env)
         env = QueryGoalWrapper(env)
     return env
 

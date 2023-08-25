@@ -101,7 +101,7 @@ class Spot2DEnv(SpotGym):
     def get_obs_from_state_goal(state: SpotState, goal_frame: Frame2D) -> np.ndarray:
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
         angle = R.from_quat([qx, qy, qz, qw]).as_euler("xyz", degrees=False)[2]
-        x, y, angle = goal_frame.transform(x, y, angle)
+        x, y, angle = goal_frame.transform_pose(x, y, angle)
         vx, vy, _, _, _, w = state.velocity_of_body_in_vision
         vx, vy = goal_frame.transform_direction(np.array((vx, vy)))
         return np.array([x, y, np.cos(angle), np.sin(angle), vx, vy, w])
@@ -142,10 +142,11 @@ class Spot2DEnv(SpotGym):
                     --------------
                     k: keyboard control
                     r: reset base position to current position
+                    b: print hitbox
                     c: continue
                     h: why am I seeing this?
                     answer: """))
-                while option not in ['k', 'r', 'c', 'h']:
+                while option not in ['k', 'r', 'c', 'h', 'b']:
                     print(f'entered "{option}". invalid option...')
                     option = input('answer: ')
                 if option == 'k':
@@ -158,6 +159,11 @@ class Spot2DEnv(SpotGym):
                             break
                         action = self.__keyboard.act(None)
                     input("manual control ended. press enter to go back to options...")
+                elif option == 'b':
+                    print("hitbox:")
+                    for row in self._get_spot_hitbox(self._read_robot_state()):
+                        print(row)
+                    input("press enter to go back to options...")
                 elif option == 'r':
                     print("WARNING: boundary safety checks and reset position will now be computed relative to the current pose")
                     confirm = input("confirm action by entering yes: ")

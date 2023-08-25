@@ -271,7 +271,7 @@ class SpotGymBase(object):
             except:
                 if self.verbose == SpotVerbose.VERBOSE:
                     self.logger.warning('Error reading state:\n'+traceback.format_exc())
-            if state is None and endtime > time.time():
+            if state is None and (timeout is None or endtime > time.time()):
                 time.sleep(READ_STATE_SLEEP_PERIOD)
             else:
                 break
