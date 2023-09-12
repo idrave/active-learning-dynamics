@@ -54,7 +54,6 @@ class Session(BaseBuffer):
                  max_size: int=1000000) -> None:
         """
         Parameters
-            joint_names: list of joint names
             only_kinematic: if True, only store KinematicState data
             cmd_type: type of commands stored
             max_size: maximum size of the buffer

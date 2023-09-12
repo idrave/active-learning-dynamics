@@ -151,7 +151,7 @@ def add_common_args(main_parser: argparse.ArgumentParser):
     main_parser.add_argument('-f', '--freq', default=10, type=int, help='Frequency at which commands are supplied to the environment')
     main_parser.add_argument('-o', '--output', default='output', type=str, help='Output directory')
     main_parser.add_argument('--noactnorm', action='store_true', help='Set action normalization to False in replay buffer')
-    main_parser.add_argument('--seed', default=0, type=int, help='Randomization seed')
+    main_parser.add_argument('--seed', default=None, type=int, help='Randomization seed')
 
 def add_robomaster_parser(parser: argparse.ArgumentParser):
     # Environment arguments
@@ -196,7 +196,10 @@ def collect_data(args):
     output_dir = Path(args.output)/('%s-%s'%(args.tag,get_timestamp_str()))
     output_dir.mkdir(parents=True)
     yaml.dump(vars(args), open(output_dir/'args.yaml', 'w'))
-    rng = jax.random.PRNGKey(args.seed)
+    if args.seed is not None:
+        rng = jax.random.PRNGKey(args.seed)
+    else:
+        rng = None
     if args.robot == 'robomaster':
         env = create_robomaster_env(
             poscontrol=args.poscontrol,
@@ -213,7 +216,10 @@ def collect_data(args):
             xy_speed=args.xy_speed,
             a_speed=args.a_speed
         )
-        rng, agent_rng = jax.random.split(rng)
+        if rng is not None:
+            rng, agent_rng = jax.random.split(rng)
+        else:
+            agent_rng = None
         args.agent_rng = agent_rng
         args.reward_model = env.unwrapped.reward
         agent = args.agent(args)
@@ -244,7 +250,10 @@ def collect_data(args):
             img_dir = output_dir/'img'
             img_dir.mkdir()
             env = Trajectory2DWrapper(env, img_dir)
-        rng, agent_rng = jax.random.split(rng)
+        if rng is not None:
+            rng, agent_rng = jax.random.split(rng)
+        else:
+            agent_rng = None
         agent = create_spot_agent(
             observation_space=env.observation_space,
             action_space=env.action_space,

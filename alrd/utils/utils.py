@@ -10,7 +10,9 @@ import jax.numpy as jnp
 from typing import Optional, Sequence, Callable
 import pickle
 import json
+import yaml
 from pathlib import Path
+from dataclasses import dataclass
 
 def get_timestamp_str():
     return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -58,6 +60,13 @@ def change_frame_2d(vector, origin, angle, degrees=True):
     """
     return rotate_2d_vector(vector - origin, -angle, degrees=degrees)
 
+@dataclass
+class Pose2D(yaml.YAMLObject):
+    yaml_tag = u'!Pose2D'
+    x: float
+    y: float
+    angle: float
+
 class Frame2D:
     def __init__(self, x, y, angle) -> None:
         """
@@ -74,7 +83,7 @@ class Frame2D:
         return change_frame_2d(vector, (self.x, self.y), self.angle, degrees=False)
     
     def transform_direction(self, vector) -> np.ndarray:
-        return rotate_2d_vector(vector, self.angle, degrees=False)
+        return rotate_2d_vector(vector, -self.angle, degrees=False)
     
     def transform_pose(self, x, y, angle):
         x, y = change_frame_2d(np.array([x,y]), (self.x, self.y), self.angle, degrees=False)

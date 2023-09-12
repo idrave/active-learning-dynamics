@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Tuple
 from alrd.environment.spot.spot2d import Spot2DEnv
+from alrd.utils.utils import Frame2D, rotate_2d_vector
+from alrd.environment.spot.utils import get_hitbox
 from gym.core import Env, Wrapper
 import numpy as np
 from pathlib import Path
@@ -16,6 +18,19 @@ class RandomGoalWrapper(Wrapper):
         kwargs['goal'] = self.env.observation_space.sample()[:2]
         return self.env.reset(**kwargs)
     
+class QueryStartWrapper(Wrapper):
+    def __init__(self, env: Spot2DEnv):
+        super().__init__(env)
+    
+    def reset(self, seed: int | None = None, options: dict | None = None):
+        x = input('Enter start x: ')
+        y = input('Enter start y: ')
+        angle = input('Enter start angle: ')
+        if options is None:
+            options = {}
+        options['pose'] = np.array([float(x), float(y), float(angle)])
+        return self.env.reset(seed=seed, options=options)
+
 class QueryGoalWrapper(Wrapper):
     def __init__(self, env: Spot2DEnv):
         super().__init__(env)
@@ -76,8 +91,8 @@ class Trajectory2DWrapper(Wrapper):
         return obs, reward, terminated, truncated, info
     
     def close(self):
-        self.__end_episode()
         super().close()
+        self.__end_episode()
 
     def __end_episode(self):
         if len(self.__trajectory) > 1:
@@ -88,14 +103,39 @@ class Trajectory2DWrapper(Wrapper):
 
     def __save_trajectory(self):
         trajectory = np.array(self.__trajectory)
-        plt.figure()
+        plt.figure(figsize=(10, 5))
         plt.subplot(1, 2, 1)
         plt.title('Position')
-        plt.xlim(self.env.observation_space.low[0], self.env.observation_space.high[0])
-        plt.ylim(self.env.observation_space.low[1], self.env.observation_space.high[1])
-        plt.scatter(trajectory[:, 0], trajectory[:, 1], c=np.linspace(0.2,1,trajectory.shape[0]), cmap="Reds")
+        goal_frame = self.env.goal_frame
+        goal_in_env = self.env.body_start_frame.transform_pose(
+            goal_frame.x, goal_frame.y, goal_frame.angle
+        )
+        frame = Frame2D(goal_in_env[0], goal_in_env[1], 0.0) # only translate
+        corners = [
+            [self.env.config.min_x, self.env.config.min_y],
+            [self.env.config.min_x, self.env.config.max_y],
+            [self.env.config.max_x, self.env.config.max_y],
+            [self.env.config.max_x, self.env.config.min_y],
+        ]
+        corners = np.array(corners)
+        corners = frame.transform(corners)
+        position = rotate_2d_vector(trajectory[:, :2], goal_in_env[2], degrees=False) # align to environment
+        last_x, last_y = position[-1, :2]
+        last_angle = np.arctan2(trajectory[-1, 3], trajectory[-1, 2])
+        last_angle += goal_in_env[2]
+        plt.xlim(corners[:,0].min() - 0.5, corners[:,0].max() + 0.5)
+        plt.ylim(corners[:,1].min() - 0.5, corners[:,1].max() + 0.5)
+        plt.gca().set_aspect('equal')
+        plt.scatter(position[:, 0], position[:, 1], c=np.linspace(0.2,1,position.shape[0]), cmap="Reds")
+        plt.scatter([0],[0], color='green', marker='x')
+        plt.arrow(0., 0., 0.5 * np.cos(goal_in_env[2]), 0.5 * np.sin(goal_in_env[2]), color='green', width=0.05)
+        for i in range(-1, len(corners)-1):
+            plt.plot([corners[i,0], corners[i+1,0]], [corners[i,1], corners[i+1,1]], marker = 'o', color='black')
+        box = get_hitbox(last_x, last_y, last_angle)
+        for i in range(-1, len(box)-1):
+            plt.plot([box[i,0], box[i+1,0]], [box[i,1], box[i+1,1]], marker = 'o', color='yellow')
         plt.subplot(1, 2, 2)
-        plt.title('Angle')
+        plt.title('Angle to goal')
         plt.ylim(-np.pi, np.pi)
         plt.plot(np.arange(trajectory.shape[0]), np.arctan2(trajectory[:, 3], trajectory[:, 2]))
         name = f'{self.__counter:03d}.png'

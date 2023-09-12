@@ -14,8 +14,8 @@ class KeyboardAgent(Agent):
             'a': (0, -1, 0),
             's': (-1, 0, 0),
             'd': (0, 1, 0),
-            'q': (0, 0, -1),
-            'e': (0, 0, 1)
+            'q': (0, 0, 1),
+            'e': (0, 0, -1)
         }
         self.noangle = noangle
     

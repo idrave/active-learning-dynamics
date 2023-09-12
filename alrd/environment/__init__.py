@@ -25,6 +25,7 @@ from alrd.environment.spot.spot2d import (
     Spot2DReward,
     change_spot2d_obs_frame,
 )
+from alrd.environment.spot.simulate2d import Spot2DEnvSim
 from alrd.environment.spot.spotgym import SpotGym
 from alrd.environment.spot.wrappers import QueryGoalWrapper, QueryStartWrapper
 from alrd.environment.wrappers.transforms import (
@@ -126,18 +127,27 @@ def create_spot_env(
     query_goal: bool = False,
     action_cost: float = 0.0,
     velocity_cost: float = 0.0,
+    simulated: bool = False
 ):
     """
     Creates and initializes spot environment.
     """
-    env = Spot2DEnv(
-        config,
-        cmd_freq,
-        monitor_freq,
-        log_dir=log_dir,
-        action_cost=action_cost,
-        velocity_cost=velocity_cost,
-    )
+    if not simulated:
+        env = Spot2DEnv(
+            config,
+            cmd_freq,
+            monitor_freq,
+            log_dir=log_dir,
+            action_cost=action_cost,
+            velocity_cost=velocity_cost,
+        )
+    else:
+        env = Spot2DEnvSim(
+            config,
+            cmd_freq,
+            action_cost=action_cost,
+            velocity_cost=velocity_cost,
+        )
     if query_goal:
         env = QueryStartWrapper(env)
         env = QueryGoalWrapper(env)
@@ -173,8 +183,8 @@ def load_dataset(
         learn_deltas=learn_deltas,
     )
     if goal is not None:
-        reward_model = Spot2DReward(
-            action_cost=action_cost, velocity_cost=velocity_cost
+        reward_model = Spot2DReward.create(
+            action_coeff=action_cost, velocity_coeff=velocity_cost
         )
         reward_fn = reward_model.predict
     tran = data.get_full_raw_data()
@@ -194,7 +204,8 @@ def load_episodic_dataset(
     velocity_cost: float = 0.0,
     normalize: bool = True,
     action_normalize: bool = False,
-    learn_deltas: bool = True
+    learn_deltas: bool = True,
+    episode_len: Optional[int] = None
 ):
     """
     Parameters
@@ -211,7 +222,12 @@ def load_episodic_dataset(
     action_shape = (3,)
     # hide_in_obs = [0,1,2,3]
     hide_in_obs = None
-    assert isinstance(data, EpisodicReplayBuffer)
+    assert isinstance(data, BaseBuffer)
+    if episode_len is None:
+        assert isinstance(data, EpisodicReplayBuffer)
+        num_episodes = data.num_episodes
+    else:
+        num_episodes = data.size // episode_len
     buffer = EpisodicReplayBuffer(
         obs_shape=obs_shape,
         action_shape=action_shape,
@@ -223,12 +239,21 @@ def load_episodic_dataset(
         hide_in_obs=hide_in_obs,
     )
     if goal is not None:
-        reward_model = Spot2DReward(
-            action_cost=action_cost, velocity_cost=velocity_cost
+        reward_model = Spot2DReward.create(
+            action_coeff=action_cost, velocity_coeff=velocity_cost
         )
         reward_fn = reward_model.predict
-    for i in range(data.num_episodes):
-        tran = data.get_episode(i)
+    for i in range(num_episodes):
+        if episode_len is None:
+            tran = data.get_episode(i)
+        else:
+            tran = Transition(
+                obs         = data.obs[i * episode_len : (i + 1) * episode_len],
+                action      = data.action[i * episode_len : (i + 1) * episode_len],
+                next_obs    = data.next_obs[i * episode_len : (i + 1) * episode_len],
+                reward      = data.reward[i * episode_len : (i + 1) * episode_len],
+                done        = data.done[i * episode_len : (i + 1) * episode_len],
+            )
         if goal is not None:
             tran.obs[:] = change_spot2d_obs_frame(tran.obs, goal[:2], goal[2])
             tran.next_obs[:] = change_spot2d_obs_frame(tran.next_obs, goal[:2], goal[2])
@@ -280,12 +305,16 @@ def get_first_n(buffer: BaseBuffer, n: int):
         reward=tran.reward[:n],
         done=tran.done[:n],
     )
-    new_buffer = ReplayBuffer(
+    augment = None
+    if isinstance(buffer, EpisodicReplayBuffer):
+        augment = buffer.augment
+    new_buffer = EpisodicReplayBuffer(
         obs_shape=buffer.obs_shape,
         action_shape=buffer.action_shape,
         normalize=buffer.normalize,
         action_normalize=buffer.action_normalize,
         learn_deltas=buffer.learn_deltas,
+        augment=augment
     )
     new_buffer.add(new_tran)
     return new_buffer

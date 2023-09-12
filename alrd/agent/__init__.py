@@ -6,6 +6,7 @@ from alrd.agent.xbox import SpotXbox2D
 from alrd.agent.trajaxopt import TraJaxOptAgent
 from alrd.agent.adapter import AgentAdapter
 from alrd.agent.model_based import ModelBasedAgentAdapter
+from alrd.agent.sac import SACAgent
 from mbse.agents.model_based.model_based_agent import ModelBasedAgent
 from mbse.models.wrappers import ActionSmoothing
 from mbse.agents.model_based.smooth_agent import SmoothAgent, SmoothActionAgent
@@ -61,6 +62,7 @@ class SpotAgentEnum(Enum):
     KEYBOARD='keyboard'
     XBOX='xbox'
     SAC='sac'
+    SACMB='sacmb'
 
 def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum, optimizer_path: str | None,
                       smoothing_coeff: float | None, rng, explore: bool):
@@ -70,6 +72,11 @@ def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum
     elif agent_type == SpotAgentEnum.XBOX:
         return SpotXbox2D()
     elif agent_type == SpotAgentEnum.SAC:
+        sac_optimizer = cloudpickle.load(open(optimizer_path, 'rb'))
+        assert isinstance(sac_optimizer, SACOptimizer)
+        agent = SACAgent(sac_optimizer, smoothing_coeff)
+        return agent
+    elif agent_type == SpotAgentEnum.SACMB:
         sac_optimizer = cloudpickle.load(open(optimizer_path, 'rb'))
         assert isinstance(sac_optimizer, SACOptimizer)
         sac_kwargs = {
