@@ -49,7 +49,8 @@ def rotate_2d_vector_jax(vector, angle, degrees=True):
     return jnp.array([vector[0] * jnp.cos(angle) - vector[1] * jnp.sin(angle), vector[0] * jnp.sin(angle) + vector[1] * jnp.cos(angle)])
 
 def rotate_2d_vector_cossin(vector, cos, sin):
-    return jnp.array([vector[0] * cos - vector[1] * sin, vector[0] * sin + vector[1] * cos])
+    return jnp.concatenate([(vector[..., 0] * cos - vector[..., 1] * sin)[...,None],
+                            (vector[..., 0] * sin + vector[..., 1] * cos)[...,None]], axis=-1)
 
 def change_frame_2d(vector, origin, angle, degrees=True):
     """
