@@ -7,6 +7,7 @@ from alrd.agent.trajaxopt import TraJaxOptAgent
 from alrd.agent.adapter import AgentAdapter
 from alrd.agent.model_based import ModelBasedAgentAdapter
 from alrd.agent.sac import SACAgent
+from alrd.environment.spot.utils import MAX_ANGULAR_SPEED, MAX_SPEED
 from mbse.agents.model_based.model_based_agent import ModelBasedAgent
 from mbse.models.wrappers import ActionSmoothing
 from mbse.agents.model_based.smooth_agent import SmoothAgent, SmoothActionAgent
@@ -63,9 +64,11 @@ class SpotAgentEnum(Enum):
     XBOX='xbox'
     SAC='sac'
     SACMB='sacmb'
+    GP='gp'
 
 def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum, optimizer_path: str | None,
-                      smoothing_coeff: float | None, rng, explore: bool):
+                      smoothing_coeff: float | None, rng, explore: bool, episode_len: int | None, freq: float,
+                      gp_undersample: int | None):
     if agent_type == SpotAgentEnum.KEYBOARD:
         base_agent = KeyboardAgent(xy_speed=1, a_speed=1)
         return KeyboardResetAgent(base_agent)
@@ -102,6 +105,17 @@ def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum
             )
         agent.update_optimizer(sac_optimizer)
         return ModelBasedAgentAdapter(agent, rng, eval=not explore)
+    elif agent_type == SpotAgentEnum.GP:
+            scale = (MAX_SPEED/2., MAX_SPEED/2., MAX_ANGULAR_SPEED/2.)
+            gp_agent = create_async_rbf_gp_agent(
+                length_scale=1.,
+                noise=1e-2,
+                scale=scale,
+                max_steps=episode_len,
+                freq=freq,
+                sample=gp_undersample,
+                seed=jax.random.randint(rng, [1,], minval=0, maxval=2 ** 31 - 1).item())
+            return gp_agent
     else:
         raise NotImplementedError(f'Agent type {agent_type} not implemented')
 

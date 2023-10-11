@@ -5,16 +5,17 @@ from alrd.environment.spot.spot import SpotEnvironmentConfig
 from alrd.environment.spot.spot2d import Spot2DReward, MIN_X, MIN_Y, MAX_X, MAX_Y
 from alrd.utils.utils import Frame2D
 import math
-from alrd.environment.spot.utils import MAX_SPEED, MAX_ANGULAR_SPEED
+from alrd.environment.spot.utils import MAX_SPEED, MAX_ANGULAR_SPEED, get_hitbox
+from abc import ABC, abstractmethod
 
-class Spot2DEnvSim(gym.Env):
+MARGIN = 0.2
+
+class Spot2DBaseSim(gym.Env, ABC):
     obs_shape = (7,)
     action_shape = (3,)
 
-    def __init__(self, config: SpotEnvironmentConfig, freq, action_cost=0.0, velocity_cost=0.0):
+    def __init__(self, config: SpotEnvironmentConfig, action_cost=0.0, velocity_cost=0.0):
         self.config = config
-        self.freq = freq
-        self.dt = 1 / freq
         self.action_cost = action_cost
         self.velocity_cost = velocity_cost
         self.goal_frame = None
@@ -36,6 +37,7 @@ class Spot2DEnvSim(gym.Env):
     def reset(self, seed=None, options=None):
         if options is None:
             options = {}
+        super().reset(seed=seed, options=options)
         pose = options.get('pose', (self.config.start_x, self.config.start_y, self.config.start_angle))
         goal = options.get('goal', (self.config.start_x, self.config.start_y, self.config.start_angle))
         self.goal_frame = Frame2D(*goal)
@@ -43,8 +45,41 @@ class Spot2DEnvSim(gym.Env):
         self.state = np.array([*pose, 0, 0, 0])
         obs = self._get_obs()
         return obs, {}
+
+    def is_in_bounds(self, state) -> bool:
+        x, y, theta = state[:3]
+        xg, yg, thetag = self.goal_frame.inverse_pose(x, y, theta)
+        box = get_hitbox(xg, yg, thetag)
+        min_x, min_y = np.min(box, axis=0)
+        max_x, max_y = np.max(box, axis=0)
+        return min_x > self.config.min_x + MARGIN and max_x < self.config.max_x - MARGIN and \
+                min_y > self.config.min_y + MARGIN and max_y < self.config.max_y - MARGIN
     
+    @abstractmethod
+    def _update_state(self, action):
+        pass
+
     def step(self, action):
+        self._update_state(action)
+        obs = self._get_obs()
+        reward = self.reward.predict(obs, action)
+        truncate = not self.is_in_bounds(self.state)
+        info = {}
+        info['dist'] = np.linalg.norm(obs[:2]).item()
+        info['angle'] = np.abs(np.arctan2(obs[3], obs[2])).item()
+        return obs, reward, False, truncate, info
+    
+    def stop_robot(self):
+        pass
+
+
+class Spot2DEnvSim(Spot2DBaseSim):
+    def __init__(self, config: SpotEnvironmentConfig, freq, **kwargs):
+        super().__init__(config, **kwargs)
+        self.freq = freq
+        self.dt = 1 / freq
+
+    def _update_state(self, action):
         action_global = Frame2D(*self.state[:3]).transform_direction(action[:2])
         x = self.state[0] + self.state[3] * self.dt + (self.state[3] - action_global[0]) * self.dt / 2
         y = self.state[1] + self.state[4] * self.dt + (self.state[4] - action_global[1]) * self.dt / 2
@@ -54,15 +89,3 @@ class Spot2DEnvSim(gym.Env):
         vy = action_global[1]
         vtheta = action[2]
         self.state = np.array([x, y, theta, vx, vy, vtheta])
-        obs = self._get_obs()
-        reward = self.reward.predict(obs, action)
-        position = self.goal_frame.inverse([x, y])
-        truncate = position[0] < self.config.min_x or position[0] > self.config.max_x \
-                    or position[1] < self.config.min_y or position[1] > self.config.max_y
-        info = {}
-        info['dist'] = np.linalg.norm(obs[:2])
-        info['angle'] = np.abs(np.arctan2(obs[3], obs[2]))
-        return obs, reward, False, truncate, info
-    
-    def stop_robot(self):
-        pass

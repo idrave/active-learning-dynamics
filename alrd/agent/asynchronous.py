@@ -1,7 +1,9 @@
-from threading import Event, Thread
+import time
+from threading import Event, Thread, Lock
 from alrd.environment.robomaster.subscriber import TopicServer
 from mbse.agents.model_based.model_based_agent import ModelBasedAgent
 from mbse.optimizers.sac_based_optimizer import SACOptimizer
+from alrd.agent.absagent import Agent
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -110,3 +112,60 @@ class AsyncAgent(ModelBasedAgent):
         super().prepare_agent_for_rollout()
         self.reset()
 
+
+class SharedValue:
+    def __init__(self) -> None:
+        self.__value = None
+        self.__lock = Lock()
+        self.__event = Event()
+    
+    def set(self, value):
+        with self.__lock:
+            self.__value = value
+            self.__event.set()
+    
+    def get(self, wait=True):
+        is_set = False
+        while wait and not is_set:
+            is_set = self.__event.wait(timeout=1.)
+        with self.__lock:
+            value = self.__value
+            self.__event.clear()
+        return value
+
+    def reset(self):
+        with self.__lock:
+            self.__value = None
+            self.__event.clear()
+
+class AsyncWrapper(Agent):
+    def __init__(self, agent: Agent, act_callback = None) -> None:
+        super().__init__()
+        self.agent = agent
+        self._obs = SharedValue()
+        self._action = SharedValue()
+        self._thread = Thread(target=self._act_thread, daemon=True)
+        self._act_callback = act_callback
+        self._thread.start()
+    
+    def _act_thread(self):
+        while True:
+            obs = self._obs.get()
+            start = time.time()
+            action = self.agent.act(obs)
+            self._action.set((action, time.time() - start))
+    
+    def act(self, obs):
+        self._obs.set(obs)
+        res = self._action.get(wait=False)
+        if res is None:
+            res = self._action.get(wait=True)
+        action, act_time = res
+        if self._act_callback is not None:
+            self._act_callback(act_time)
+        return action
+    
+    def reset(self):
+        self._obs.reset()
+        self._action.reset()
+        self.agent.reset()

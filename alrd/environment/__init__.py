@@ -26,6 +26,7 @@ from alrd.environment.spot.spot2d import (
     change_spot2d_obs_frame,
 )
 from alrd.environment.spot.simulate2d import Spot2DEnvSim
+from alrd.environment.spot.sim_model import Spot2DModelSim
 from alrd.environment.spot.spotgym import SpotGym
 from alrd.environment.spot.wrappers import QueryGoalWrapper, QueryStartWrapper
 from alrd.environment.wrappers.transforms import (
@@ -38,6 +39,7 @@ from alrd.environment.wrappers.transforms import (
 from jax import vmap
 
 from mbse.utils.replay_buffer import EpisodicReplayBuffer, Transition, ReplayBuffer, BaseBuffer
+from mbse.models.dynamics_model import DynamicsModel
 
 __all__ = [
     "BaseRobomasterEnv",
@@ -127,7 +129,8 @@ def create_spot_env(
     query_goal: bool = False,
     action_cost: float = 0.0,
     velocity_cost: float = 0.0,
-    simulated: bool = False
+    simulated: bool = False,
+    dynamics_model: DynamicsModel | None = None
 ):
     """
     Creates and initializes spot environment.
@@ -142,12 +145,20 @@ def create_spot_env(
             velocity_cost=velocity_cost,
         )
     else:
-        env = Spot2DEnvSim(
-            config,
-            cmd_freq,
-            action_cost=action_cost,
-            velocity_cost=velocity_cost,
-        )
+        if dynamics_model is None:
+            env = Spot2DEnvSim(
+                config,
+                cmd_freq,
+                action_cost=action_cost,
+                velocity_cost=velocity_cost,
+            )
+        else:
+            env = Spot2DModelSim(
+                dynamics_model,
+                config,
+                action_cost=action_cost,
+                velocity_cost=velocity_cost
+            )
     if query_goal:
         env = QueryStartWrapper(env)
         env = QueryGoalWrapper(env)

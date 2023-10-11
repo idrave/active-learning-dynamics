@@ -48,6 +48,9 @@ class RandomGPAgent(Agent):
             self.current = -1
         self.current = min(self.current + 1, len(self.actions) - 1)
         return np.tanh(self.actions[self.current])
+    
+    def reset(self):
+        self.actions = None
 
 class AsyncGPAgent(RandomGPAgent):
     def __init__(self, gp, scale, max_steps, freq=50, seed=0, sample=1, queue_sz=1):
