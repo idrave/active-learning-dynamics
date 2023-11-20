@@ -28,6 +28,10 @@ class Spot2DBaseSim(gym.Env, ABC):
                                         high=np.array([MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.reset()
     
+    @property
+    def default_reset(self):
+        return (self.config.start_x, self.config.start_y, self.config.start_angle)
+
     def start(self):
         pass
 

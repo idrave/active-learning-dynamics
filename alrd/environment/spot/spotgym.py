@@ -55,6 +55,10 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         self.always_reset_pos = always_reset_pos
         if log_dir is not None:
             self.logger.addHandler(logging.FileHandler(self.log_dir / "spot_gym.log"))
+    
+    @property
+    def default_reset(self):
+        return self.__default_reset
 
     def start(self):
         if self.log_dir is not None and not self.log_dir.is_dir():

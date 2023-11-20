@@ -3,7 +3,7 @@ from __future__ import annotations
 import pickle
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from alrd.environment.robomaster.env import (
@@ -22,6 +22,7 @@ from alrd.environment.robomaster.maze_env import (
 from alrd.environment.spot.spot import SpotEnvironmentConfig
 from alrd.environment.spot.spot2d import (
     Spot2DEnv,
+    Spot2DEnvDone,
     Spot2DReward,
     change_spot2d_obs_frame,
 )
@@ -36,6 +37,7 @@ from alrd.environment.wrappers.transforms import (
     RemoveAngleActionWrapper,
     RepeatActionWrapper,
 )
+from alrd.environment.spot.random_pos import RandomPosInit
 from jax import vmap
 
 from mbse.utils.replay_buffer import EpisodicReplayBuffer, Transition, ReplayBuffer, BaseBuffer
@@ -130,20 +132,38 @@ def create_spot_env(
     action_cost: float = 0.0,
     velocity_cost: float = 0.0,
     simulated: bool = False,
-    dynamics_model: DynamicsModel | None = None
+    dynamics_model: DynamicsModel | None = None,
+    seed: int | None = None,
+    random_init_pose: Tuple[float, float, float, float] | None = None,
+    done_on_goal_tol: Tuple[float, float, float] | None = None
 ):
     """
     Creates and initializes spot environment.
     """
+    assert not random_init_pose or not query_goal
+    assert not random_init_pose or seed
     if not simulated:
-        env = Spot2DEnv(
-            config,
-            cmd_freq,
-            monitor_freq,
-            log_dir=log_dir,
-            action_cost=action_cost,
-            velocity_cost=velocity_cost,
-        )
+        if done_on_goal_tol is not None:
+            env = Spot2DEnvDone(
+                done_on_goal_tol[0],
+                done_on_goal_tol[1],
+                done_on_goal_tol[2],
+                config,
+                cmd_freq,
+                monitor_freq,
+                log_dir=log_dir,
+                action_cost=action_cost,
+                velocity_cost=velocity_cost,
+            )
+        else:
+            env = Spot2DEnv(
+                config,
+                cmd_freq,
+                monitor_freq,
+                log_dir=log_dir,
+                action_cost=action_cost,
+                velocity_cost=velocity_cost,
+            )
     else:
         if dynamics_model is None:
             env = Spot2DEnvSim(
@@ -162,6 +182,8 @@ def create_spot_env(
     if query_goal:
         env = QueryStartWrapper(env)
         env = QueryGoalWrapper(env)
+    if random_init_pose:
+        env = RandomPosInit(env, seed, random_init_pose[:2], random_init_pose[2:])
     return env
 
 

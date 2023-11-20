@@ -1,6 +1,7 @@
 from __future__ import annotations
 from alrd.agent.absagent import Agent, AgentReset
 from alrd.agent.gp import RandomGPAgent, PiecewiseRandomGPAgent, create_async_rbf_gp_agent
+from alrd.agent.uniform import UniformAgent
 from alrd.agent.keyboard import KeyboardAgent, KeyboardGPAgent, KeyboardResetAgent
 from alrd.agent.xbox import SpotXbox2D
 from alrd.agent.trajaxopt import TraJaxOptAgent
@@ -65,6 +66,7 @@ class SpotAgentEnum(Enum):
     SAC='sac'
     SACMB='sacmb'
     GP='gp'
+    UNIFORM='uniform'
 
 def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum, optimizer_path: str | None,
                       smoothing_coeff: float | None, rng, explore: bool, episode_len: int | None, freq: float,
@@ -116,6 +118,8 @@ def create_spot_agent(observation_space, action_space, agent_type: SpotAgentEnum
                 sample=gp_undersample,
                 seed=jax.random.randint(rng, [1,], minval=0, maxval=2 ** 31 - 1).item())
             return gp_agent
+    elif agent_type == SpotAgentEnum.UNIFORM:
+        return UniformAgent(jax.random.randint(rng, [1,], minval=0, maxval=2 ** 31 - 1).item())
     else:
         raise NotImplementedError(f'Agent type {agent_type} not implemented')
 

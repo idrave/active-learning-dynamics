@@ -182,7 +182,9 @@ class Spot2DReward(RewardModel):
         sigmoid: str = 'long_tail', 
         vel_cost_on_goal: bool = False,
         vel_lin_margin: float = None,
-        vel_ang_margin: float = None
+        vel_ang_margin: float = None,
+        dist_bound: float = 0.,
+        angle_bound: float = 0.
     ):
         if vel_cost_on_goal:
             if vel_lin_margin is None:
@@ -191,8 +193,8 @@ class Spot2DReward(RewardModel):
                 vel_ang_margin = jnp.pi / 18.
         if goal_pos is None:
             goal_pos = jnp.zeros([3])
-        dist_rew = DistReward.create(goal_pos[:2], dist_margin, sigmoid=sigmoid)
-        angl_rew = AngleReward.create(goal_pos[2], angle_margin, sigmoid=sigmoid)
+        dist_rew = DistReward.create(goal_pos[:2], dist_margin, sigmoid=sigmoid, bounds=(0., dist_bound))
+        angl_rew = AngleReward.create(goal_pos[2], angle_margin, sigmoid=sigmoid, bounds=(0., angle_bound))
         act_cost = ActionCost.create(sigmoid=sigmoid)
         linvel_cost = LinearVelCost.create(sigmoid=sigmoid)
         angvel_cost = AngularVelCost.create(sigmoid=sigmoid)
@@ -389,6 +391,19 @@ class Spot2DEnv(SpotGym):
         self.__goal_frame = Frame2D(*goal_pos)
         return super().reset(seed=seed, options=options)
 
+
+class Spot2DEnvDone(Spot2DEnv):
+    """Stops the robot when close to goal pose with low velocity"""
+    def __init__(self, dist_tol, ang_tol, vel_tol, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.dist_tol = dist_tol
+        self.ang_tol = ang_tol
+        self.vel_tol = vel_tol
+    
+    def is_done(self, obs: np.ndarray) -> bool:
+        return np.linalg.norm(obs[:2]) < self.dist_tol and \
+                np.abs(np.arctan2(obs[3], obs[2])) < self.ang_tol and \
+                np.linalg.norm(obs[4:]) < self.vel_tol
 
 def change_spot2d_obs_frame(obs: np.ndarray, origin: np.ndarray, theta: float) -> np.ndarray:
     """

@@ -347,14 +347,12 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     )
     parser.add_argument("--simulated", action="store_true")
     parser.add_argument("--sim_model", default=None)
+    parser.add_argument("--rand_pos", nargs=4, type=float, help="(x1, x2, y1, y2) randomize position and angle with position in range (x1, x2) and (y1, y2))")
     parser.add_argument("--tasks", default=None)
-
-
-
+    parser.add_argument("--done_on_goal", default=None, type=float, nargs=3, help="dist, angle, vel")
 
 def set_agent_time(vp: ValuePlaceholder, value):
     vp.value = value
-
 
 def collect_data(args):
     output_dir = Path(args.output) / ("%s-%s" % (args.tag, get_timestamp_str()))
@@ -404,6 +402,11 @@ def collect_data(args):
         sim_model = None
         if args.sim_model is not None:
             sim_model = cloudpickle.load(open(args.sim_model, 'rb'))
+        if rng is not None:
+            rng, env_rng = jax.random.split(rng)
+            env_seed = jax.random.randint(env_rng, (), 0, 2 ** 31 - 1).item()
+        else:
+            env_seed = None
         env = create_spot_env(
             config=config,
             cmd_freq=args.freq,
@@ -413,7 +416,10 @@ def collect_data(args):
             simulated=args.simulated,
             action_cost=args.action_cost,
             velocity_cost=args.velocity_cost,
-            dynamics_model=sim_model
+            dynamics_model=sim_model,
+            seed=env_seed,
+            random_init_pose=args.rand_pos,
+            done_on_goal_tol=args.done_on_goal,
         )
         if args.record_camera is not None:
             video_dir = output_dir / "video"
