@@ -254,14 +254,13 @@ class Spot2DEnv(SpotGym):
                  log_dir: str | Path | None = None,
                  action_cost=0.0,
                  velocity_cost=0.0,
-                 always_reset_pos: bool = True,
                  skip_ui: bool = False,
                  log_str=True):
         if log_dir is None:
             session = None
         else:
             session = Session(only_kinematic=True, cmd_type=CommandEnum.MOBILITY)
-        super().__init__(config, cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=log_str, always_reset_pos=always_reset_pos)
+        super().__init__(config, cmd_freq, monitor_freq, log_dir=log_dir, session=session, log_str=log_str)
         self.observation_space = spaces.Box(low=np.array([MIN_X, MIN_Y, -1, -1,-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),
                                             high=np.array([MAX_X, MAX_Y, 1, 1, MAX_SPEED, MAX_SPEED, MAX_ANGULAR_SPEED]))
         self.action_space = spaces.Box(low=np.array([-MAX_SPEED, -MAX_SPEED, -MAX_ANGULAR_SPEED]),

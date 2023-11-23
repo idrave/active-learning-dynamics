@@ -26,7 +26,6 @@ from alrd.agent.repeat import RepeatAgent
 from alrd.agent.asynchronous import AsyncWrapper
 from alrd.environment import BaseRobomasterEnv, create_robomaster_env, create_spot_env
 from alrd.environment.robomaster.filter import KalmanFilter
-from alrd.environment.spot.spotgym import ResetEnum
 from alrd.environment.spot.wrappers import Trajectory2DWrapper
 from alrd.environment.wrappers.video_recorder import VideoRecordingWrapper
 from alrd.utils.utils import get_timestamp_str, Pose2D
@@ -103,7 +102,6 @@ def collect_data_buffer(
     max_steps,
     num_steps,
     tasks: List[Task2D],
-    avoid_pose_reset,
     use_tqdm,
 ):
     num_points = max_steps
@@ -121,8 +119,6 @@ def collect_data_buffer(
         if not started:
             count = 0
             options = {}
-            if avoid_pose_reset:
-                options["action"] = ResetEnum.STAND
             if tasks is not None:
                 startpose = tasks[episode_count].start
                 goal = tasks[episode_count].goal
@@ -332,11 +328,6 @@ def add_spot_parser(parser: argparse.ArgumentParser):
         help="Whether to query the goal from the user at every reset",
     )
     parser.add_argument(
-        "--avoid_pose_reset",
-        action="store_true",
-        help="Whether to reset the robot's pose only when necessary and not at every episode",
-    )
-    parser.add_argument(
         "--record_camera",
         type=int,
         default=None,
@@ -485,7 +476,6 @@ def collect_data(args):
             max_episode_steps,
             args.n_steps,
             tasks,
-            args.avoid_pose_reset,
             use_tqdm=args.tqdm,
         )
     except KeyboardInterrupt:

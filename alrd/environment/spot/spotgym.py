@@ -5,41 +5,29 @@ import pickle
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Tuple
 
 import gym
 import numpy as np
 from alrd.environment.spot.command import Command
-from alrd.environment.spot.orientation_command import OrientationCommand
 from alrd.environment.spot.record import Session, Episode
 from alrd.environment.spot.robot_state import SpotState
-from alrd.environment.spot.spot import (COMMAND_DURATION, CHECK_TIMEOUT,
-                                        SpotGymStateMachine, SpotEnvironmentConfig, State)
-from alrd.environment.spot.utils import Vector3D
+from alrd.environment.spot.spot import SpotGymStateMachine, SpotEnvironmentConfig
 from alrd.utils.utils import get_timestamp_str
 
-from enum import Enum
-
-class ResetEnum(Enum):
-    RESET_POSE = 0
-    STAND = 1
-    NONE = 2
 
 class SpotGym(SpotGymStateMachine, gym.Env, ABC):
     def __init__(self, config: SpotEnvironmentConfig, cmd_freq: float, monitor_freq: float = 30,
-                 log_dir: str | Path | None = None, session: Session | None = None, log_str: bool = False, always_reset_pos: bool = False):
+                 log_dir: str | Path | None = None, session: Session | None = None, log_str: bool = False):
         """
-        Parameters:
-            cmd_freq: Environment's maximum action frequency. Commands will take at least 1/cmd_freq seconds to execute.
-            monitor_freq: Environment's maximum state monitoring frequency for checking position boundaries.
-            truncate_on_timeout: If True, the episode will end when a robot command takes longer than STEP_TIMEOUT seconds.
-            log_dir: Directory where to save logs.
+        Args:
+            cmd_freq: Environment's action frequency. Commands will take at approximately 1/cmd_freq seconds to execute.
+            monitor_freq: Environment's desired state monitoring frequency for checking position boundaries.
+            log_dir: Directory where to save environment logs.
             session: Session object to record episode data.
             log_str: If True, command and state info is logged as a string to a file.
         If log_dir is not None and session is not None, session data will be dumped after each episode.
         """
-        #assert 1/monitor_freq <= CHECK_TIMEOUT + 1e-5, "Monitor frequency must be higher than 1/{} Hz to ensure safe navigation".format(CHECK_TIMEOUT)
-        assert 1/cmd_freq <= COMMAND_DURATION + 1e-5, "Command frequency must be higher than 1/COMMAND_DURATION ({} Hz) ".format(1/COMMAND_DURATION)
         assert session is None or log_dir is not None, "If session is not None, log_dir must be specified"
         assert not log_str or log_dir is not None, "If log_str is True, log_dir must be specified"
         super().__init__(config, monitor_freq=monitor_freq)
@@ -47,12 +35,11 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         self.__should_reset = True
         self.__last_robot_state = None
         self.__current_episode = None
-        self.__default_reset = (config.start_x, config.start_y, config.start_angle)
+        self.__default_reset = np.array((config.start_x, config.start_y, config.start_angle))
         self.log_dir = Path(log_dir) if log_dir is not None else None
         self.log_file = None
         self.session = session
         self.log_str = log_str
-        self.always_reset_pos = always_reset_pos
         if log_dir is not None:
             self.logger.addHandler(logging.FileHandler(self.log_dir / "spot_gym.log"))
     
@@ -78,8 +65,9 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         self.log_file.write(state.to_str()+"\n")
 
     def stop_robot(self) -> bool:
+        """ Stops the robot and ends the current episode """
         if not self.isopen:
-            raise RuntimeError("Environment is closed but stop was called.")
+            raise RuntimeError("Robot was shutdown, but stop was called.")
         result = self._issue_stop()
         self._end_episode()
         return result
@@ -111,7 +99,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         """
         if not self.isopen or self.should_reset:
             if not self.isopen:
-                raise RuntimeError("Environment is closed step was called.")
+                raise RuntimeError("Robot was shutdown, but step was called.")
             else:
                 raise RuntimeError("Environment should be reset but step was called.")
         start_cmd = time.time()
@@ -148,6 +136,7 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
         info = {"cmd_time": cmd_time, "read_time": read_time, "oob": oob}
         truncate = False
         if next_state is None:
+            # if command was interrupted, return previous state
             truncate = True
             next_state = self.__last_robot_state
         if oob:
@@ -166,57 +155,59 @@ class SpotGym(SpotGymStateMachine, gym.Env, ABC):
             self.stop_robot()
         return obs, reward, done, truncate, info
 
-    def _reset(self, action: ResetEnum, pose: np.ndarray) -> Tuple[SpotState | None, float] | None:
+    def _reset(self, pose: np.ndarray) -> Tuple[SpotState, float]:
         """
-        Reset the robot to the origin.
+        Reset the robot to the starting pose.
+        Args:
+            pose: [x, y, angle] where to reset the robot in global coordinates
+        Returns:
+            new_state: starting state, None if 
+        Raises:
+            RuntimeError if the robot reset fails
         """
         if not self.isopen:
-            raise RuntimeError("Environment is closed but reset was called.")
+            raise RuntimeError("Robot is shutdown, but reset was called.")
         if not self.should_reset:
             self._end_episode()
-        reset_pose = self.state in {State.STOPPED, State.STOPPING} or action == ResetEnum.RESET_POSE
-        if reset_pose or action == ResetEnum.STAND:
-            self.logger.info("Reset called, stopping robot...")
-            success = self._issue_stop()
-            if not success:
-                self.logger.error("Reset stop failed")
-                return None
-            self.logger.info("Robot stopped")
-            if reset_pose:
-                # reset position
-                success, _ = self._issue_reset(*pose)
-                self.logger.info("Resetting robot position...")
-                if not success:
-                    self.logger.error("Failed to reset robot position")
-                    return None
+        self.logger.debug("Reset called, stopping robot...")
+        success = self._issue_stop()
+        if not success:
+            self.logger.error("Reset stop command failed")
+            raise RuntimeError("Failed to perform environment reset. Robot stop failed.")
+        self.logger.debug("Robot stopped")
+        # reset position
+        success, _ = self._issue_reset(*pose)
+        self.logger.info("Resetting robot position...")
+        if not success:
+            self.logger.error("Failed to reset robot position")
+            raise RuntimeError("Failed to perform environment reset. Pose reset failed.")
         start = time.time()
         new_state = self._read_robot_state()
         read_time = time.time() - start
         self.__should_reset = False
         self.__last_robot_state = new_state
-        self.__current_episode = Episode(new_state)
+        if self.session is not None:
+            self.__current_episode = Episode(new_state)
         return new_state, read_time
 
-    def reset(self, seed: int | None = None, options: dict | None = None) -> Tuple[np.ndarray | None, dict]:
+    def reset(self, seed: int | None = None, options: dict | None = None) -> Tuple[np.ndarray, dict]:
         """
         Args:
             seed: set the seed for the environment's random number generator.
-            options: additional options for the reset, among them:
-                action: ResetEnum indicating  whether to reset pose, stand, or do nothing.
+            options: additional options for the reset, such as:
+                pose: [x,y,angle] where the robot should be reset, defaults to the starting pose specified
+                    in the configuration
+        Raises:
+            RuntimeError if the robot reset fails
         """
         super().reset(seed=seed, options=options)
         if options is None:
             options = {}
-        action = options.get("action", ResetEnum.RESET_POSE)
         pose = options.get("pose", self.__default_reset)
-        # TODO: check input types
-        result = self._reset(action, pose)
-        if result is None:
-            return None, {} # TODO raise exception
+        assert isinstance(pose, np.ndarray) and pose.shape == (3,), "Pose must be an array of size 3: (x, y, angle)"
+        result = self._reset(pose)
         state, read_time = result
         info = {"read_time": read_time}
-        if state is None:
-            return None, info
         obs = self.get_obs_from_state(state)
         self.logger.info('Resetting with initial observation {}'.format(obs))
         return obs, info
