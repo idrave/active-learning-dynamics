@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import textwrap
 from pathlib import Path
 from typing import Any, Optional, Tuple, Callable
@@ -11,11 +10,11 @@ import jax.numpy as jnp
 import numpy as np
 from alrd.environment.spot.command import Command, CommandEnum
 from alrd.environment.spot.mobility_command import MobilityCommand
-from alrd.environment.spot.record import Episode, Session
+from alrd.environment.spot.record import Session
 from alrd.environment.spot.robot_state import SpotState
 from alrd.environment.spot.spotgym import SpotGym 
 from alrd.environment.spot.spot import SpotEnvironmentConfig
-from alrd.environment.spot.utils import MAX_ANGULAR_SPEED, MAX_SPEED, get_front_coord
+from alrd.environment.spot.utils import MAX_ANGULAR_SPEED, MAX_SPEED
 from alrd.utils.utils import change_frame_2d, rotate_2d_vector, Frame2D
 from alrd.agent.keyboard import KeyboardResetAgent, KeyboardAgent
 from bosdyn.api.spot import robot_command_pb2 as spot_command_pb2
@@ -25,7 +24,6 @@ from alrd.environment.spot.utils import MAX_ANGULAR_SPEED, MAX_SPEED
 
 from mbse.models.reward_model import RewardModel
 from jdm_control.rewards import get_tolerance_fn
-from dataclasses import InitVar
 from flax import struct
 
 def norm(x: jax.Array, axis: int):
@@ -33,6 +31,8 @@ def norm(x: jax.Array, axis: int):
     return jnp.sqrt(norm + 1e-12)
 
 _DEFAULT_VALUE_AT_MARGIN = 0.1
+
+# Reward functions
 
 @struct.dataclass
 class DistReward(RewardModel):
@@ -286,6 +286,10 @@ class Spot2DEnv(SpotGym):
 
     @staticmethod
     def get_obs_from_state_goal(state: SpotState, goal_frame: Frame2D) -> np.ndarray:
+        """
+        Returns observations corresponding to the state using as origin the goal position
+        with the x axis in the direction of the goal orientation.
+        """
         x, y, _, qx, qy, qz, qw = state.pose_of_body_in_vision
         angle = R.from_quat([qx, qy, qz, qw]).as_euler("xyz", degrees=False)[2]
         x, y, angle = goal_frame.transform_pose(x, y, angle)
@@ -372,13 +376,16 @@ class Spot2DEnv(SpotGym):
                     print("continuing...")
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Any, dict]:
+        """
+        Args:
+            options:
+                goal: [x,y,angle] sets the goal pose    
+        """
         if not self.__skip_ui:
-            # TODO this stop should not be necessary, but need this for now to guarantee the unmonitored
-            # command works in the state machine
             success = self._issue_stop()
             if not success:
                 self.logger.error("Reset stop failed")
-                return None, {}
+                raise RuntimeError("Reset stop failed")
             self._show_ui()
         if options is None:
             options = {}

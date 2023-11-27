@@ -144,6 +144,8 @@ def create_spot_env(
     assert not random_init_pose or seed
     if not simulated:
         if done_on_goal_tol is not None:
+            # the episode is ended when the robot is at certain distance and angle
+            # from the goal with velocity smaller than the one specified
             env = Spot2DEnvDone(
                 done_on_goal_tol[0],
                 done_on_goal_tol[1],

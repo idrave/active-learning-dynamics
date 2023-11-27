@@ -183,10 +183,10 @@ def collect_data_buffer(
 
 
 def add_common_args(main_parser: argparse.ArgumentParser):
-    main_parser.add_argument("--tag", type=str, default="data")
-    main_parser.add_argument("--tqdm", action="store_true")
+    main_parser.add_argument("--tag", type=str, default="data", help="Used for tagging output folder")
+    main_parser.add_argument("--tqdm", action="store_true", help="Activate progress bar")
     main_parser.add_argument(
-        "-n", "--n_steps", default=None, type=int, help="Number of steps to record"
+        "-n", "--n_steps", default=None, type=int, help="total number of steps to record"
     )
     main_parser.add_argument(
         "-e", "--episode_len", default=None, type=int, help="Maximum episode length"
@@ -300,8 +300,8 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--asynch", action="store_true", help="Compute action asynchronously"
     )
-    parser.add_argument("-ac", "--action_cost", type=float, default=0.1)
-    parser.add_argument("-vc", "--velocity_cost", type=float, default=0.1)
+    parser.add_argument("-ac", "--action_cost", type=float, default=0.1, help="Action cost weight in environment reward")
+    parser.add_argument("-vc", "--velocity_cost", type=float, default=0.1, help="Velocity cost weight in environment reward")
     parser.add_argument(
         "--explore",
         action="store_true",
@@ -314,13 +314,13 @@ def add_spot_parser(parser: argparse.ArgumentParser):
         "--optimizer_checkpoint",
         default=None,
         type=str,
-        help="Path to optimizer checkpoint",
+        help="Path to optimizer checkpoint, used in the SAC agent",
     )
     parser.add_argument(
         "--gp_undersample",
         default=1,
         type=int,
-        help="Undersampling factor of the GP agent",
+        help="Frequency with which to sample values from GP agent, the rest are interpolated",
     )
     parser.add_argument(
         "--query_goal",
@@ -336,11 +336,11 @@ def add_spot_parser(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--save_trajectory", action="store_true", help="Save trajectory plot to file"
     )
-    parser.add_argument("--simulated", action="store_true")
-    parser.add_argument("--sim_model", default=None)
-    parser.add_argument("--rand_pos", nargs=4, type=float, help="(x1, x2, y1, y2) randomize position and angle with position in range (x1, x2) and (y1, y2))")
-    parser.add_argument("--tasks", default=None)
-    parser.add_argument("--done_on_goal", default=None, type=float, nargs=3, help="dist, angle, vel")
+    parser.add_argument("--simulated", action="store_true", help='Use simulated environment instead of real robot')
+    parser.add_argument("--sim_model", default=None, help="Optional model to use for simulating the robot")
+    parser.add_argument("--rand_pos", nargs=4, type=float, help="(x1, x2, y1, y2) randomize initial position and angle, with position in range (x1, x2) and (y1, y2))")
+    parser.add_argument("--tasks", default=None, help="YAML file specifying start and goal poses for each episode")
+    parser.add_argument("--done_on_goal", default=None, type=float, nargs=3, help="Goal tolerance (distance, angle, velocity)")
 
 def set_agent_time(vp: ValuePlaceholder, value):
     vp.value = value
@@ -436,8 +436,9 @@ def collect_data(args):
             freq=args.freq,
             gp_undersample=args.gp_undersample,
         )
-        agent_state = ValuePlaceholder(None)
+        agent_state = None
         if args.asynch:
+            agent_state = ValuePlaceholder(None)
             agent = AsyncWrapper(agent, lambda x: set_agent_time(agent_state, x))
 
         buffer = EpisodicReplayBuffer(
