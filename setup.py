@@ -3,6 +3,10 @@ from setuptools import setup, find_packages
 required = [
     'numpy >= 1.18',
     'opencv-python >= 4.2',
+    'keyboard >= 0.13.5',
+    'distro >= 1.8.0',
+    'tensorboard >= 2.14.0'
+    'pykalman >= 0.9.5'
     'netaddr >= 0.8',
     'netifaces >= 0.10',
     'myqr >= 2.3',

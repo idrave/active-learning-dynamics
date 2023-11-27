@@ -1,0 +1,9 @@
+!SpotEnvironmentConfig
+hostname: '192.168.80.3'
+min_x: -0.9
+max_x: 5
+min_y: -2.6
+max_y: 1.4
+start_x: 2.0
+start_y: -0.5
+start_angle: 0.0
